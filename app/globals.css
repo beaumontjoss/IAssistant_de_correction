@@ -1,26 +1,152 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@font-face {
+  font-family: 'Marianne';
+  src: url('/fonts/Marianne-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Marianne';
+  src: url('/fonts/Marianne-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Marianne';
+  src: url('/fonts/Marianne-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Marianne';
+  src: url('/fonts/Marianne-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bleu-france: #000091;
+  --color-bleu-france-light: #E3E3FD;
+  --color-bleu-france-hover: #1212FF;
+  --color-bleu-france-active: #2323FF;
+  --color-rouge-marianne: #E1000F;
+  --color-rouge-light: #FFE9E6;
+  --color-fond-page: #F6F6F6;
+  --color-fond-card: #FFFFFF;
+  --color-fond-alt: #F0F0F0;
+  --color-texte-primaire: #161616;
+  --color-texte-secondaire: #666666;
+  --color-texte-disabled: #929292;
+  --color-bordure: #E5E5E5;
+  --color-bordure-focus: #000091;
+  --color-success: #18753C;
+  --color-success-light: #B8FEC9;
+  --color-warning: #B34000;
+  --color-warning-light: #FFE8D7;
+  --color-error: #CE0500;
+  --color-error-light: #FFE9E6;
+  --color-info: #0063CB;
+  --color-info-light: #E8EDFF;
+
+  --font-marianne: 'Marianne', 'Source Sans 3', system-ui, -apple-system, sans-serif;
+
+  --color-background: var(--color-fond-page);
+  --color-foreground: var(--color-texte-primaire);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-fond-page);
+  color: var(--color-texte-primaire);
+  font-family: var(--font-marianne);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a0a0a0;
+}
+
+/* Markdown editor styles */
+.markdown-content h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  color: var(--color-bleu-france);
+}
+
+.markdown-content h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--color-texte-primaire);
+}
+
+.markdown-content p {
+  margin-bottom: 0.75rem;
+  line-height: 1.7;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-content li {
+  margin-bottom: 0.25rem;
+  line-height: 1.6;
+}
+
+/* Loading animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.loading-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-fond-alt) 25%,
+    var(--color-bordure) 50%,
+    var(--color-fond-alt) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Focus visible */
+*:focus-visible {
+  outline: 2px solid var(--color-bleu-france);
+  outline-offset: 2px;
 }
