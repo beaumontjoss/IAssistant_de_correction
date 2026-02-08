@@ -10,9 +10,7 @@ import { FileUpload } from '@/components/ui/file-upload'
 import { SeverityToggle } from '@/components/ui/severity-toggle'
 import {
   MATIERES,
-  TRANSCRIPTION_MODELS,
   CORRECTION_MODELS,
-  TEXT_ONLY_MODELS,
   type ControlData,
   type Severite,
 } from '@/lib/types'
@@ -33,24 +31,11 @@ export function Step1Config ({ data, onUpdate, onNext }: Step1ConfigProps) {
       return
     }
     if (data.enonce_images.length === 0) {
-      toast.error('Veuillez ajouter au moins une image de l\'enonce')
-      return
-    }
-    if (TEXT_ONLY_MODELS.includes(data.modele_transcription)) {
-      toast.error('Ce modele ne supporte pas la lecture d\'images. Veuillez choisir un modele multimodal.')
+      toast.error('Veuillez ajouter au moins une image de l\'énoncé')
       return
     }
     onNext()
   }, [data, onNext])
-
-  const handleTranscriptionModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const modelId = e.target.value
-    if (TEXT_ONLY_MODELS.includes(modelId)) {
-      toast.error('Ce modele ne supporte pas la lecture d\'images. Veuillez choisir un modele multimodal.')
-      return
-    }
-    onUpdate({ modele_transcription: modelId })
-  }, [onUpdate])
 
   return (
     <motion.div
@@ -60,7 +45,7 @@ export function Step1Config ({ data, onUpdate, onNext }: Step1ConfigProps) {
       transition={{ duration: 0.3 }}
       className="space-y-6"
     >
-      {/* Section: Enonce et corrige */}
+      {/* Section : Énoncé et corrigé */}
       <Card>
         <CardContent className="space-y-6">
           <div className="flex items-center gap-3 mb-2">
@@ -68,22 +53,22 @@ export function Step1Config ({ data, onUpdate, onNext }: Step1ConfigProps) {
               <BookOpen className="h-5 w-5 text-bleu-france" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-texte-primaire">Documents du controle</h3>
-              <p className="text-sm text-texte-secondaire">Ajoutez l&apos;enonce et le corrige (optionnel)</p>
+              <h3 className="text-lg font-bold text-texte-primaire">Documents du contrôle</h3>
+              <p className="text-sm text-texte-secondaire">Ajoutez l&apos;énoncé et le corrigé (optionnel)</p>
             </div>
           </div>
 
           <FileUpload
-            label="Enonce du controle"
-            hint="Images ou PDF de l'enonce. Formats acceptes : JPG, PNG, PDF"
+            label="Énoncé du contrôle"
+            hint="Images ou PDF de l'énoncé. Formats acceptés : JPG, PNG, PDF"
             files={data.enonce_images}
             onFilesChange={(files) => onUpdate({ enonce_images: files })}
             processFiles={(files) => processFiles(files)}
           />
 
           <FileUpload
-            label="Corrige (optionnel)"
-            hint="Le corrige type du controle, si disponible"
+            label="Corrigé (optionnel)"
+            hint="Le corrigé type du contrôle, si disponible"
             files={data.corrige_images}
             onFilesChange={(files) => onUpdate({ corrige_images: files })}
             processFiles={(files) => processFiles(files)}
@@ -91,7 +76,7 @@ export function Step1Config ({ data, onUpdate, onNext }: Step1ConfigProps) {
         </CardContent>
       </Card>
 
-      {/* Section: Parametres */}
+      {/* Section : Paramètres */}
       <Card>
         <CardContent className="space-y-6">
           <div className="flex items-center gap-3 mb-2">
@@ -99,21 +84,21 @@ export function Step1Config ({ data, onUpdate, onNext }: Step1ConfigProps) {
               <Settings className="h-5 w-5 text-bleu-france" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-texte-primaire">Parametres de correction</h3>
-              <p className="text-sm text-texte-secondaire">Configurez le contexte et les modeles IA</p>
+              <h3 className="text-lg font-bold text-texte-primaire">Paramètres de correction</h3>
+              <p className="text-sm text-texte-secondaire">Configurez le contexte et le modèle IA</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <Input
               label="Classe"
-              placeholder="Ex: 3eme B, 1ere S2..."
+              placeholder="Ex : 3ème B, 1ère S2..."
               value={data.classe}
               onChange={(e) => onUpdate({ classe: e.target.value })}
             />
 
             <Select
-              label="Matiere"
+              label="Matière"
               value={data.matiere}
               onChange={(e) => onUpdate({ matiere: e.target.value })}
               options={MATIERES}
@@ -125,36 +110,23 @@ export function Step1Config ({ data, onUpdate, onNext }: Step1ConfigProps) {
             onChange={(severite: Severite) => onUpdate({ severite })}
           />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <Select
-              label="Modele de transcription"
-              hint="Modele utilise pour lire les copies manuscrites"
-              value={data.modele_transcription}
-              onChange={handleTranscriptionModelChange}
-              options={TRANSCRIPTION_MODELS.map((m) => ({
-                value: m.id,
-                label: m.label,
-              }))}
-            />
-
-            <Select
-              label="Modele de correction"
-              hint="Modele utilise pour evaluer les copies"
-              value={data.modele_correction}
-              onChange={(e) => onUpdate({ modele_correction: e.target.value })}
-              options={CORRECTION_MODELS.map((m) => ({
-                value: m.id,
-                label: m.label,
-              }))}
-            />
-          </div>
+          <Select
+            label="Modèle de correction"
+            hint="Modèle utilisé pour le barème et l'évaluation des copies"
+            value={data.modele_correction}
+            onChange={(e) => onUpdate({ modele_correction: e.target.value })}
+            options={CORRECTION_MODELS.map((m) => ({
+              value: m.id,
+              label: m.label,
+            }))}
+          />
         </CardContent>
       </Card>
 
       {/* Actions */}
       <div className="flex justify-end">
         <Button onClick={handleValidate} size="lg" className="gap-2">
-          Generer le bareme
+          Générer le barème
           <ArrowRight className="h-4 w-4" />
         </Button>
       </div>

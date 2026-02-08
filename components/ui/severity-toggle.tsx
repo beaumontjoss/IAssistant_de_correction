@@ -12,17 +12,17 @@ const options: { value: Severite; label: string; description: string }[] = [
   {
     value: 'indulgente',
     label: 'Indulgente',
-    description: 'Valorise l\'effort et les reponses partielles',
+    description: 'Valorise l\'effort et les réponses partielles',
   },
   {
     value: 'classique',
     label: 'Classique',
-    description: 'Correction standard et equilibree',
+    description: 'Correction standard et équilibrée',
   },
   {
     value: 'severe',
-    label: 'Severe',
-    description: 'Exigeante, reponses precises attendues',
+    label: 'Sévère',
+    description: 'Exigeante, réponses précises attendues',
   },
 ]
 
@@ -30,7 +30,7 @@ export function SeverityToggle ({ value, onChange }: SeverityToggleProps) {
   return (
     <div className="space-y-1.5">
       <label className="block text-sm font-medium text-texte-primaire">
-        Severite de correction
+        Sévérité de correction
       </label>
       <div className="flex bg-fond-alt rounded-lg p-1 gap-1">
         {options.map((option) => (

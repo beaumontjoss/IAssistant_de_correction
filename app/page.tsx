@@ -31,7 +31,7 @@ export default function HomePage () {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur border border-white/20 text-white/90 text-xs font-medium mb-6">
               <Zap className="h-3 w-3" />
-              Correction assistee par intelligence artificielle
+              Correction assistée par intelligence artificielle
             </div>
 
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white leading-tight tracking-tight">
@@ -41,7 +41,7 @@ export default function HomePage () {
             </h1>
 
             <p className="text-lg text-white/70 mt-6 max-w-lg leading-relaxed">
-              Importez vos copies manuscrites, laissez l&apos;IA les transcrire et les evaluer selon votre bareme. Gardez toujours le controle final.
+              Importez vos copies manuscrites, laissez l&apos;IA les transcrire et les évaluer selon votre barème. Gardez toujours le contrôle final.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 mt-10">
@@ -61,10 +61,10 @@ export default function HomePage () {
       <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         <div className="text-center mb-14">
           <h2 className="text-2xl sm:text-3xl font-bold text-texte-primaire">
-            Comment ca fonctionne
+            Comment ça fonctionne
           </h2>
           <p className="text-texte-secondaire mt-3 max-w-lg mx-auto">
-            Un processus simple en 4 etapes, de l&apos;enonce a la note finale
+            Un processus simple en 4 étapes, de l&apos;énoncé à la note finale
           </p>
         </div>
 
@@ -74,25 +74,25 @@ export default function HomePage () {
               step: 1,
               icon: FileText,
               title: 'Configuration',
-              description: 'Importez l\'enonce, choisissez la matiere et les modeles d\'IA',
+              description: 'Importez l\'énoncé, choisissez la matière et les modèles d\'IA',
             },
             {
               step: 2,
               icon: Brain,
-              title: 'Bareme IA',
-              description: 'L\'IA genere un bareme detaille que vous pouvez ajuster',
+              title: 'Barème IA',
+              description: 'L\'IA génère un barème détaillé que vous pouvez ajuster',
             },
             {
               step: 3,
               icon: Users,
               title: 'Transcription',
-              description: 'Photographiez les copies, l\'IA transcrit l\'ecriture manuscrite',
+              description: 'Photographiez les copies, l\'IA transcrit l\'écriture manuscrite',
             },
             {
               step: 4,
               icon: BarChart3,
               title: 'Correction',
-              description: 'Correction automatique avec notes detaillees et commentaires',
+              description: 'Correction automatique avec notes détaillées et commentaires',
             },
           ].map((feature) => (
             <div
@@ -123,18 +123,18 @@ export default function HomePage () {
             {[
               {
                 icon: Shield,
-                title: 'Donnees protegees',
-                description: 'Aucune donnee stockee en ligne. Le nom des eleves ne quitte jamais votre navigateur.',
+                title: 'Données protégées',
+                description: 'Aucune donnée stockée en ligne. Le nom des élèves ne quitte jamais votre navigateur.',
               },
               {
                 icon: Brain,
-                title: 'Multi-modeles',
-                description: 'Choisissez parmi les meilleurs modeles d\'IA : Claude, GPT, Gemini, Mistral et plus.',
+                title: 'Multi-modèles',
+                description: 'Choisissez parmi les meilleurs modèles d\'IA : Claude, GPT, Gemini, Mistral et plus.',
               },
               {
                 icon: Zap,
                 title: 'Gain de temps',
-                description: 'Reduisez le temps de correction tout en gardant le controle total sur les notes.',
+                description: 'Réduisez le temps de correction tout en gardant le contrôle total sur les notes.',
               },
             ].map((item) => (
               <div key={item.title} className="flex gap-4">
@@ -157,10 +157,10 @@ export default function HomePage () {
       <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         <div className="bg-gradient-to-br from-bleu-france to-[#1a1a8a] rounded-3xl p-10 sm:p-14 text-center">
           <h2 className="text-2xl sm:text-3xl font-bold text-white mb-4">
-            Pret a gagner du temps ?
+            Prêt à gagner du temps ?
           </h2>
           <p className="text-white/70 max-w-md mx-auto mb-8">
-            Commencez votre premiere correction assistee par IA en quelques minutes.
+            Commencez votre première correction assistée par IA en quelques minutes.
           </p>
           <Link
             href="/correction"
@@ -185,7 +185,7 @@ export default function HomePage () {
               </span>
             </div>
             <p className="text-xs text-texte-secondaire">
-              POC — Correction assistee par intelligence artificielle
+              POC — Correction assistée par intelligence artificielle
             </p>
           </div>
         </div>

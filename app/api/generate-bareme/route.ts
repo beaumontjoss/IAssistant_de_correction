@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { callLLM, buildTextMessages, buildMessagesWithImages, type ImageContent } from '@/lib/api-clients'
 import { getBaremePrompt } from '@/lib/prompts'
+import { robustJsonParse, normalizeBareme } from '@/lib/json-utils'
 
 export async function POST (req: NextRequest) {
   try {
@@ -9,7 +10,7 @@ export async function POST (req: NextRequest) {
 
     if (!modelId || !matiere || !classe || !enonceImages?.length) {
       return NextResponse.json(
-        { error: 'Parametres manquants' },
+        { error: 'Paramètres manquants' },
         { status: 400 }
       )
     }
@@ -24,10 +25,10 @@ export async function POST (req: NextRequest) {
       XAI_API_KEY: process.env.XAI_API_KEY,
     }
 
-    // Build the prompt
-    const prompt = getBaremePrompt(matiere, classe, '[Voir images ci-jointes]', corrigeImages?.length ? '[Voir images du corrige ci-jointes]' : undefined)
+    // Construire le prompt
+    const prompt = getBaremePrompt(matiere, classe, '[Voir images ci-jointes]', corrigeImages?.length ? '[Voir images du corrigé ci-jointes]' : undefined)
 
-    // Build messages with images
+    // Construire les images
     const allImages: ImageContent[] = []
 
     for (const img of enonceImages) {
@@ -50,30 +51,60 @@ export async function POST (req: NextRequest) {
 
     let result: string
 
+    const jsonMode = provider !== 'anthropic'
+
     if (provider === 'google') {
       const parts = buildMessagesWithImages(prompt, allImages, modelId)
-      result = await callLLM(modelId, parts, env)
+      result = await callLLM(modelId, parts, env, { jsonMode })
     } else if (allImages.length > 0 && provider !== 'deepseek') {
       const messages = buildMessagesWithImages(prompt, allImages, modelId)
-      result = await callLLM(modelId, messages, env)
+
+      // Prefilling pour Anthropic : forcer le début du JSON
+      if (provider === 'anthropic') {
+        messages.push({ role: 'assistant', content: '{' })
+      }
+
+      result = await callLLM(modelId, messages, env, { jsonMode })
+
+      // Reconstituer le JSON si prefill utilisé
+      if (provider === 'anthropic' && !result.startsWith('{')) {
+        result = '{' + result
+      }
     } else {
       const messages = buildTextMessages('', prompt)
-      result = await callLLM(modelId, messages, env)
+
+      if (provider === 'anthropic') {
+        messages.push({ role: 'assistant', content: '{' })
+      }
+
+      result = await callLLM(modelId, messages, env, { jsonMode })
+
+      if (provider === 'anthropic' && !result.startsWith('{')) {
+        result = '{' + result
+      }
     }
 
-    // Parse JSON from the response
-    const jsonMatch = result.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      return NextResponse.json(
-        { error: 'Reponse invalide du modele' },
-        { status: 500 }
-      )
+    // Parsing robuste + normalisation
+    const parsed = robustJsonParse(result)
+    const bareme = normalizeBareme(parsed)
+
+    // Si aucune question n'a pu être extraite, créer un barème minimal éditable
+    if (bareme.questions.length === 0) {
+      console.warn('Barème : aucune question extraite, création d\'un barème par défaut')
+      bareme.total = 20
+      bareme.questions = [
+        {
+          id: '1',
+          titre: 'Item 1 — À compléter',
+          points: 20,
+          criteres: ['Critère à définir par le professeur'],
+        },
+      ]
     }
 
-    const bareme = JSON.parse(jsonMatch[0])
     return NextResponse.json({ bareme })
   } catch (err: unknown) {
-    console.error('Erreur generation bareme:', err)
+    console.error('Erreur génération barème:', err)
     const message = err instanceof Error ? err.message : 'Erreur inconnue'
     return NextResponse.json({ error: message }, { status: 500 })
   }

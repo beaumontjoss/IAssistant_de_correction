@@ -31,7 +31,7 @@ function addFooter (doc: jsPDF) {
     doc.setFontSize(7)
     doc.setTextColor(...GRIS)
     doc.text(
-      'Correction assistee par IA — verifiee par le professeur',
+      'Correction assistée par IA — vérifiée par le professeur',
       105,
       287,
       { align: 'center' }
@@ -102,7 +102,7 @@ export function generateStudentPDF (data: ControlData, copy: CopieEleve): void {
 
     doc.setFontSize(11)
     doc.setTextColor(...BLEU_FRANCE)
-    doc.text('Points a corriger', 14, y)
+    doc.text('Points à corriger', 14, y)
     y += 7
 
     doc.setFontSize(8)
@@ -155,12 +155,12 @@ export function generateSummaryPDF (data: ControlData): void {
   // Title
   doc.setFontSize(16)
   doc.setTextColor(0, 0, 0)
-  doc.text('Recapitulatif des notes', 14, y)
+  doc.text('Récapitulatif des notes', 14, y)
   y += 12
 
   // Main table
   const questionHeaders = data.bareme?.questions.map((q) => q.titre.substring(0, 15)) || []
-  const headers = ['Eleve', ...questionHeaders, 'Total']
+  const headers = ['Élève', ...questionHeaders, 'Total']
 
   const tableData = correctedCopies.map((copy) => {
     const questionNotes = data.bareme?.questions.map((bq) => {
@@ -226,8 +226,8 @@ export function generateSummaryPDF (data: ControlData): void {
   const stats = [
     ['Nombre de copies', String(notes.length)],
     ['Moyenne', `${moyenne.toFixed(1)} / ${total}`],
-    ['Mediane', `${mediane.toFixed(1)} / ${total}`],
-    ['Ecart-type', ecartType.toFixed(2)],
+    ['Médiane', `${mediane.toFixed(1)} / ${total}`],
+    ['Écart-type', ecartType.toFixed(2)],
     ['Note minimale', `${Math.min(...notes).toFixed(1)} / ${total}`],
     ['Note maximale', `${Math.max(...notes).toFixed(1)} / ${total}`],
   ]
@@ -245,5 +245,5 @@ export function generateSummaryPDF (data: ControlData): void {
   })
 
   addFooter(doc)
-  doc.save(`Recapitulatif_${data.classe.replace(/\s+/g, '_')}_${data.matiere}.pdf`)
+  doc.save(`Récapitulatif_${data.classe.replace(/\s+/g, '_')}_${data.matiere}.pdf`)
 }

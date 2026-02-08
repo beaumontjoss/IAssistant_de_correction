@@ -106,7 +106,7 @@ export function FileUpload ({
             </div>
             <div>
               <p className="text-sm font-medium text-texte-primaire">
-                Glissez-deposez vos fichiers ici
+                Glissez-déposez vos fichiers ici
               </p>
               <p className="text-xs text-texte-secondaire mt-1">
                 ou cliquez pour parcourir

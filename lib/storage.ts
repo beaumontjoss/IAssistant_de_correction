@@ -10,7 +10,7 @@ export function loadControl (): ControlData {
       return JSON.parse(data) as ControlData
     }
   } catch (err) {
-    console.error('Erreur lors du chargement des donnees:', err)
+    console.error('Erreur lors du chargement des données:', err)
   }
   return createEmptyControl()
 }

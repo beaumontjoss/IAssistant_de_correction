@@ -25,7 +25,7 @@ export function MarkdownEditor ({ value, onChange, className, readOnly = false }
       {!readOnly && (
         <div className="flex items-center justify-between px-4 py-2 border-b border-bordure bg-fond-alt/50">
           <span className="text-xs text-texte-secondaire font-medium">
-            Editeur Markdown
+            Éditeur Markdown
           </span>
           <div className="flex bg-fond-alt rounded-md p-0.5 gap-0.5">
             <button
@@ -39,7 +39,7 @@ export function MarkdownEditor ({ value, onChange, className, readOnly = false }
               )}
             >
               <Edit3 className="h-3 w-3" />
-              Editer
+              Éditer
             </button>
             <button
               type="button"
@@ -52,7 +52,7 @@ export function MarkdownEditor ({ value, onChange, className, readOnly = false }
               )}
             >
               <Eye className="h-3 w-3" />
-              Apercu
+              Aperçu
             </button>
           </div>
         </div>

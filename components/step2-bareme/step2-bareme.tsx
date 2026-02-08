@@ -51,21 +51,25 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
 
       onUpdate({ bareme: result.bareme })
       setHasGenerated(true)
-      toast.success('Bareme genere avec succes')
+      toast.success('Barème généré avec succès')
     } catch (err) {
       console.error('Erreur:', err)
-      toast.error(err instanceof Error ? err.message : 'Erreur lors de la generation du bareme')
+      toast.error(err instanceof Error ? err.message : 'Erreur lors de la génération du barème')
     } finally {
       setIsGenerating(false)
     }
   }, [data, onUpdate])
 
+  // Accès sécurisé aux questions du barème
+  const baremeQuestions = data.bareme?.questions ?? []
+
   const updateQuestion = useCallback((questionId: string, updates: Partial<BaremeQuestion>) => {
     if (!data.bareme) return
-    const newQuestions = data.bareme.questions.map((q) =>
+    const questions = data.bareme.questions ?? []
+    const newQuestions = questions.map((q) =>
       q.id === questionId ? { ...q, ...updates } : q
     )
-    const total = newQuestions.reduce((sum, q) => sum + q.points, 0)
+    const total = newQuestions.reduce((sum, q) => sum + (q.points || 0), 0)
     onUpdate({
       bareme: { ...data.bareme, questions: newQuestions, total },
     })
@@ -73,14 +77,15 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
 
   const addQuestion = useCallback(() => {
     if (!data.bareme) return
+    const questions = data.bareme.questions ?? []
     const newQuestion: BaremeQuestion = {
-      id: String(data.bareme.questions.length + 1),
-      titre: `Question ${data.bareme.questions.length + 1}`,
+      id: String(questions.length + 1),
+      titre: `Question ${questions.length + 1}`,
       points: 2,
-      criteres: ['Critere a definir'],
+      criteres: ['Critère à définir'],
     }
-    const newQuestions = [...data.bareme.questions, newQuestion]
-    const total = newQuestions.reduce((sum, q) => sum + q.points, 0)
+    const newQuestions = [...questions, newQuestion]
+    const total = newQuestions.reduce((sum, q) => sum + (q.points || 0), 0)
     onUpdate({
       bareme: { ...data.bareme, questions: newQuestions, total },
     })
@@ -88,8 +93,9 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
 
   const removeQuestion = useCallback((questionId: string) => {
     if (!data.bareme) return
-    const newQuestions = data.bareme.questions.filter((q) => q.id !== questionId)
-    const total = newQuestions.reduce((sum, q) => sum + q.points, 0)
+    const questions = data.bareme.questions ?? []
+    const newQuestions = questions.filter((q) => q.id !== questionId)
+    const total = newQuestions.reduce((sum, q) => sum + (q.points || 0), 0)
     onUpdate({
       bareme: { ...data.bareme, questions: newQuestions, total },
     })
@@ -97,9 +103,10 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
 
   const updateCritere = useCallback((questionId: string, critereIndex: number, value: string) => {
     if (!data.bareme) return
-    const newQuestions = data.bareme.questions.map((q) => {
+    const questions = data.bareme.questions ?? []
+    const newQuestions = questions.map((q) => {
       if (q.id !== questionId) return q
-      const newCriteres = [...q.criteres]
+      const newCriteres = [...(q.criteres ?? [])]
       newCriteres[critereIndex] = value
       return { ...q, criteres: newCriteres }
     })
@@ -108,25 +115,27 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
 
   const addCritere = useCallback((questionId: string) => {
     if (!data.bareme) return
-    const newQuestions = data.bareme.questions.map((q) => {
+    const questions = data.bareme.questions ?? []
+    const newQuestions = questions.map((q) => {
       if (q.id !== questionId) return q
-      return { ...q, criteres: [...q.criteres, 'Nouveau critere'] }
+      return { ...q, criteres: [...(q.criteres ?? []), 'Nouveau critère'] }
     })
     onUpdate({ bareme: { ...data.bareme, questions: newQuestions } })
   }, [data.bareme, onUpdate])
 
   const removeCritere = useCallback((questionId: string, critereIndex: number) => {
     if (!data.bareme) return
-    const newQuestions = data.bareme.questions.map((q) => {
+    const questions = data.bareme.questions ?? []
+    const newQuestions = questions.map((q) => {
       if (q.id !== questionId) return q
-      return { ...q, criteres: q.criteres.filter((_, i) => i !== critereIndex) }
+      return { ...q, criteres: (q.criteres ?? []).filter((_, i) => i !== critereIndex) }
     })
     onUpdate({ bareme: { ...data.bareme, questions: newQuestions } })
   }, [data.bareme, onUpdate])
 
   const handleValidate = useCallback(() => {
-    if (!data.bareme || data.bareme.questions.length === 0) {
-      toast.error('Veuillez generer ou configurer un bareme')
+    if (!data.bareme || (data.bareme.questions ?? []).length === 0) {
+      toast.error('Veuillez générer ou configurer un barème')
       return
     }
     onNext()
@@ -149,10 +158,10 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
             </div>
             <div className="text-center max-w-md">
               <h3 className="text-xl font-bold text-texte-primaire mb-2">
-                Generation du bareme
+                Génération du barème
               </h3>
               <p className="text-sm text-texte-secondaire">
-                L&apos;IA va analyser l&apos;enonce{data.corrige_images.length > 0 ? ' et le corrige' : ''} pour proposer un bareme detaille et adapte.
+                L&apos;IA va analyser l&apos;énoncé{data.corrige_images.length > 0 ? ' et le corrigé' : ''} pour proposer un barème détaillé et adapté.
               </p>
             </div>
             <Button
@@ -162,7 +171,7 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
               className="gap-2"
             >
               <Sparkles className="h-4 w-4" />
-              Generer le bareme
+              Générer le barème
             </Button>
           </CardContent>
         </Card>
@@ -177,14 +186,14 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
                 <div className="h-16 w-16 border-4 border-bleu-france-light rounded-full animate-spin border-t-bleu-france" />
               </div>
               <p className="text-sm text-texte-secondaire animate-pulse">
-                Analyse de l&apos;enonce en cours...
+                Analyse de l&apos;énoncé en cours...
               </p>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Bareme editor */}
+      {/* Éditeur de barème */}
       <AnimatePresence>
         {data.bareme && hasGenerated && !isGenerating && (
           <motion.div
@@ -201,15 +210,15 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
                       <ClipboardList className="h-5 w-5 text-bleu-france" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-bold text-texte-primaire">Bareme</h3>
+                      <h3 className="text-lg font-bold text-texte-primaire">Barème</h3>
                       <p className="text-sm text-texte-secondaire">
-                        {data.bareme.questions.length} questions
+                        {baremeQuestions.length} questions
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
                     <p className="text-3xl font-bold text-bleu-france">
-                      {data.bareme.total}
+                      {data.bareme?.total ?? 0}
                     </p>
                     <p className="text-xs text-texte-secondaire">points</p>
                   </div>
@@ -218,7 +227,7 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
             </Card>
 
             {/* Questions */}
-            {data.bareme.questions.map((question, qIndex) => (
+            {baremeQuestions.map((question, qIndex) => (
               <motion.div
                 key={question.id}
                 initial={{ opacity: 0, x: -20 }}
@@ -250,12 +259,12 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
                           </div>
                         </div>
 
-                        {/* Criteres */}
+                        {/* Critères */}
                         <div className="space-y-2 pl-1">
                           <p className="text-xs font-medium text-texte-secondaire uppercase tracking-wide">
-                            Criteres d&apos;evaluation
+                            Critères d&apos;évaluation
                           </p>
-                          {question.criteres.map((critere, cIndex) => (
+                          {(question.criteres ?? []).map((critere, cIndex) => (
                             <div key={cIndex} className="flex items-center gap-2">
                               <div className="w-1.5 h-1.5 rounded-full bg-bleu-france flex-shrink-0" />
                               <input
@@ -264,7 +273,7 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
                                 onChange={(e) => updateCritere(question.id, cIndex, e.target.value)}
                                 className="flex-1 px-2 py-1.5 text-sm border-b border-transparent hover:border-bordure focus:border-bleu-france focus:outline-none transition-colors bg-transparent"
                               />
-                              {question.criteres.length > 1 && (
+                              {(question.criteres ?? []).length > 1 && (
                                 <button
                                   type="button"
                                   onClick={() => removeCritere(question.id, cIndex)}
@@ -281,7 +290,7 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
                             className="flex items-center gap-1.5 text-xs text-bleu-france hover:text-bleu-france-hover transition-colors mt-1 cursor-pointer"
                           >
                             <Plus className="h-3 w-3" />
-                            Ajouter un critere
+                            Ajouter un critère
                           </button>
                         </div>
                       </div>
@@ -320,7 +329,7 @@ export function Step2Bareme ({ data, onUpdate, onNext, onPrev }: Step2BaremeProp
                 className="gap-2"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                Regenerer le bareme
+                Régénérer le barème
               </Button>
             </div>
           </motion.div>

@@ -12,9 +12,9 @@ export type Matiere =
   | 'Autre'
 
 export const MATIERES: { value: Matiere; label: string }[] = [
-  { value: 'Francais', label: 'Francais' },
-  { value: 'Mathematiques', label: 'Mathematiques' },
-  { value: 'Histoire-Geographie', label: 'Histoire-Geographie' },
+  { value: 'Francais', label: 'Français' },
+  { value: 'Mathematiques', label: 'Mathématiques' },
+  { value: 'Histoire-Geographie', label: 'Histoire-Géographie' },
   { value: 'SVT', label: 'SVT' },
   { value: 'Physique-Chimie', label: 'Physique-Chimie' },
   { value: 'Philosophie', label: 'Philosophie' },
@@ -104,7 +104,6 @@ export interface ControlData {
   classe: string
   matiere: string
   severite: Severite
-  modele_transcription: string
   modele_correction: string
   enonce_images: string[]
   corrige_images: string[]
@@ -119,7 +118,6 @@ export function createEmptyControl (): ControlData {
     classe: '',
     matiere: 'Francais',
     severite: 'classique',
-    modele_transcription: 'mistral-ocr',
     modele_correction: 'claude-sonnet-4-5',
     enonce_images: [],
     corrige_images: [],

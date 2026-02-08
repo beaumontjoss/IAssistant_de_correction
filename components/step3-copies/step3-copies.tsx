@@ -32,8 +32,6 @@ interface Step3CopiesProps {
   onPrev: () => void
 }
 
-const OCR_PROVIDERS = ['mistral-ocr', 'google-vision', 'azure-di']
-
 export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProps) {
   const [expandedCopy, setExpandedCopy] = useState<string | null>(null)
   const [transcribingId, setTranscribingId] = useState<string | null>(null)
@@ -41,7 +39,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
 
   const addCopy = useCallback(() => {
     if (!newStudentName.trim()) {
-      toast.error('Veuillez indiquer le nom de l\'eleve')
+      toast.error('Veuillez indiquer le nom de l\'élève')
       return
     }
 
@@ -57,7 +55,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
     onUpdate({ copies: [...data.copies, newCopy] })
     setNewStudentName('')
     setExpandedCopy(newCopy.id)
-    toast.success(`Copie ajoutee pour ${newCopy.nom_eleve}`)
+    toast.success(`Copie ajoutée pour ${newCopy.nom_eleve}`)
   }, [newStudentName, data.copies, onUpdate])
 
   const updateCopy = useCallback((copyId: string, updates: Partial<CopieEleve>) => {
@@ -69,7 +67,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
 
   const removeCopy = useCallback((copyId: string) => {
     onUpdate({ copies: data.copies.filter((c) => c.id !== copyId) })
-    toast.success('Copie supprimee')
+    toast.success('Copie supprimée')
   }, [data.copies, onUpdate])
 
   const transcribeCopy = useCallback(async (copy: CopieEleve) => {
@@ -81,26 +79,13 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
     setTranscribingId(copy.id)
 
     try {
-      const isOCR = OCR_PROVIDERS.includes(data.modele_transcription)
-
-      const endpoint = isOCR ? '/api/transcribe-ocr' : '/api/transcribe'
-      const body = isOCR
-        ? {
-            ocrProvider: data.modele_transcription,
-            correctionModelId: data.modele_correction,
-            images: copy.images,
-            enonceImages: data.enonce_images,
-          }
-        : {
-            modelId: data.modele_transcription,
-            images: copy.images,
-            enonceImages: data.enonce_images,
-          }
-
-      const res = await fetch(endpoint, {
+      const res = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          images: copy.images,
+          enonceImages: data.enonce_images,
+        }),
       })
 
       const result = await res.json()
@@ -114,7 +99,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
         transcription_validee: false,
       })
 
-      toast.success('Transcription terminee')
+      toast.success('Transcription terminée')
     } catch (err) {
       console.error('Erreur transcription:', err)
       toast.error(err instanceof Error ? err.message : 'Erreur lors de la transcription')
@@ -125,13 +110,13 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
 
   const validateTranscription = useCallback((copyId: string) => {
     updateCopy(copyId, { transcription_validee: true })
-    toast.success('Transcription validee')
+    toast.success('Transcription validée')
   }, [updateCopy])
 
   const handleNext = useCallback(() => {
     const validatedCopies = data.copies.filter((c) => c.transcription_validee)
     if (validatedCopies.length === 0) {
-      toast.error('Veuillez transcrire et valider au moins une copie')
+      toast.error('Veuillez transcrire et valider au moins une copie avant de continuer')
       return
     }
     onNext()
@@ -153,7 +138,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
               <Users className="h-5 w-5 text-bleu-france" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-texte-primaire">Copies des eleves</h3>
+              <h3 className="text-lg font-bold text-texte-primaire">Copies des élèves</h3>
               <p className="text-sm text-texte-secondaire">
                 Ajoutez les copies une par une, puis transcrivez-les
               </p>
@@ -163,7 +148,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
           <div className="flex gap-3">
             <div className="flex-1">
               <Input
-                placeholder="Nom de l'eleve (ex: Martin Dupont)"
+                placeholder="Nom de l'élève (ex : Martin Dupont)"
                 value={newStudentName}
                 onChange={(e) => setNewStudentName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') addCopy() }}
@@ -214,17 +199,17 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
                           {copy.transcription_validee ? (
                             <span className="inline-flex items-center gap-1 text-xs text-success font-medium">
                               <CheckCircle2 className="h-3 w-3" />
-                              Transcrite et validee
+                              Transcrite et validée
                             </span>
                           ) : copy.transcription_md ? (
                             <span className="inline-flex items-center gap-1 text-xs text-warning font-medium">
                               <Eye className="h-3 w-3" />
-                              A valider
+                              À valider
                             </span>
                           ) : copy.images.length > 0 ? (
                             <span className="inline-flex items-center gap-1 text-xs text-info font-medium">
                               <FileText className="h-3 w-3" />
-                              Prete a transcrire
+                              Prête à transcrire
                             </span>
                           ) : null}
                           {copy.correction && (
@@ -369,7 +354,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
           <CardContent className="py-12 text-center">
             <Users className="h-12 w-12 text-texte-disabled mx-auto mb-4" />
             <p className="text-texte-secondaire">
-              Aucune copie ajoutee. Commencez par entrer le nom d&apos;un eleve ci-dessus.
+              Aucune copie ajoutée. Commencez par entrer le nom d&apos;un élève ci-dessus.
             </p>
           </CardContent>
         </Card>
@@ -385,7 +370,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
                   {data.copies.length} copie{data.copies.length > 1 ? 's' : ''}
                 </span>
                 <span className="text-success font-medium">
-                  {data.copies.filter((c) => c.transcription_validee).length} validee{data.copies.filter((c) => c.transcription_validee).length > 1 ? 's' : ''}
+                  {data.copies.filter((c) => c.transcription_validee).length} validée{data.copies.filter((c) => c.transcription_validee).length > 1 ? 's' : ''}
                 </span>
               </div>
             </div>

@@ -16,10 +16,10 @@ import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 
 const STEPS = [
-  { number: 1, title: 'Configuration', description: 'Enonce et parametres' },
-  { number: 2, title: 'Bareme', description: 'Bareme IA' },
+  { number: 1, title: 'Configuration', description: 'Énoncé et paramètres' },
+  { number: 2, title: 'Barème', description: 'Barème IA' },
   { number: 3, title: 'Copies', description: 'Upload et transcription' },
-  { number: 4, title: 'Resultats', description: 'Correction et export' },
+  { number: 4, title: 'Résultats', description: 'Correction et export' },
 ]
 
 export default function CorrectionPage () {
@@ -36,7 +36,7 @@ export default function CorrectionPage () {
       const next = { ...prev, ...updates }
       const saved = saveControl(next)
       if (!saved) {
-        toast.error('Espace de stockage insuffisant. Exportez vos resultats et commencez un nouveau controle.')
+        toast.error('Espace de stockage insuffisant. Exportez vos résultats et commencez un nouveau contrôle.')
       }
       return next
     })
@@ -47,10 +47,10 @@ export default function CorrectionPage () {
   }, [updateData])
 
   const handleReset = useCallback(() => {
-    if (confirm('Etes-vous sur de vouloir recommencer ? Toutes les donnees seront perdues.')) {
+    if (confirm('Êtes-vous sûr de vouloir recommencer ? Toutes les données seront perdues.')) {
       clearControl()
       setData(createEmptyControl())
-      toast.success('Nouveau controle initialise')
+      toast.success('Nouveau contrôle initialisé')
     }
   }, [])
 
@@ -79,7 +79,7 @@ export default function CorrectionPage () {
                 <p className="text-xs text-texte-secondaire">
                   {data.matiere && data.classe
                     ? `${data.matiere} — ${data.classe}`
-                    : 'Nouveau controle'}
+                    : 'Nouveau contrôle'}
                 </p>
               </div>
             </Link>

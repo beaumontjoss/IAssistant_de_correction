@@ -109,7 +109,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
           severite: data.severite,
           baremeJson: JSON.stringify(data.bareme),
           mdCopie: copy.transcription_md,
-          corrigeText: data.corrige_images.length > 0 ? '[Corrige fourni]' : null,
+          corrigeText: data.corrige_images.length > 0 ? '[Corrigé fourni]' : null,
         }),
       })
 
@@ -123,7 +123,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
         c.id === copy.id ? { ...c, correction: result.correction as Correction } : c
       )
       onUpdate({ copies: newCopies })
-      toast.success(`Copie de ${copy.nom_eleve} corrigee`)
+      toast.success(`Copie de ${copy.nom_eleve} corrigée`)
     } catch (err) {
       console.error('Erreur correction:', err)
       toast.error(err instanceof Error ? err.message : 'Erreur lors de la correction')
@@ -182,7 +182,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
                 Correction par l&apos;IA
               </h3>
               <p className="text-sm text-texte-secondaire mt-1">
-                {validatedCopies.length - correctedCopies.length} copie{validatedCopies.length - correctedCopies.length > 1 ? 's' : ''} a corriger
+                {validatedCopies.length - correctedCopies.length} copie{validatedCopies.length - correctedCopies.length > 1 ? 's' : ''} à corriger
               </p>
             </div>
             <Button
@@ -213,8 +213,8 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
               {[
                 { label: 'Copies', value: String(stats.count) },
                 { label: 'Moyenne', value: `${stats.moyenne.toFixed(1)}/${stats.total}` },
-                { label: 'Mediane', value: `${stats.mediane.toFixed(1)}/${stats.total}` },
-                { label: 'Ecart-type', value: stats.ecartType.toFixed(2) },
+                { label: 'Médiane', value: `${stats.mediane.toFixed(1)}/${stats.total}` },
+                { label: 'Écart-type', value: stats.ecartType.toFixed(2) },
                 { label: 'Note min', value: `${stats.min.toFixed(1)}/${stats.total}` },
                 { label: 'Note max', value: `${stats.max.toFixed(1)}/${stats.total}` },
               ].map((stat) => (
@@ -259,7 +259,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
               <div className="h-10 w-10 rounded-lg bg-bleu-france-light flex items-center justify-center">
                 <Award className="h-5 w-5 text-bleu-france" />
               </div>
-              <h3 className="text-lg font-bold text-texte-primaire">Resultats</h3>
+              <h3 className="text-lg font-bold text-texte-primaire">Résultats</h3>
             </div>
 
             {allCorrected && (
@@ -271,7 +271,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
                   className="gap-1.5"
                 >
                   <FileDown className="h-3.5 w-3.5" />
-                  PDF recapitulatif
+                  PDF récapitulatif
                 </Button>
               </div>
             )}
@@ -285,7 +285,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
                 onClick={() => toggleSort('nom')}
                 className="col-span-4 flex items-center gap-1 cursor-pointer hover:text-texte-primaire"
               >
-                Eleve
+                Élève
                 {sortKey === 'nom' && (sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
               </button>
               <div className="col-span-3 text-center">Statut</div>
@@ -322,7 +322,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
                         {copy.correction ? (
                           <span className="inline-flex items-center gap-1 text-xs text-success font-medium">
                             <CheckCircle2 className="h-3 w-3" />
-                            Corrigee
+                            Corrigée
                           </span>
                         ) : isCorrecting ? (
                           <span className="inline-flex items-center gap-1 text-xs text-bleu-france font-medium">
@@ -385,7 +385,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
                         >
                           <div className="px-6 pb-5 pt-2 space-y-4 bg-fond-alt/20">
                             {/* Question details */}
-                            {copy.correction.questions.map((q) => (
+                            {(copy.correction.questions ?? []).map((q) => (
                               <div key={q.id} className="bg-fond-card rounded-lg p-4 border border-bordure">
                                 <div className="flex items-center justify-between mb-2">
                                   <p className="text-sm font-medium">{q.titre}</p>
@@ -395,7 +395,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
                                       value={q.note}
                                       onChange={(e) => {
                                         const newNote = Number(e.target.value)
-                                        const newQuestions = copy.correction!.questions.map((cq) =>
+                                        const newQuestions = (copy.correction!.questions ?? []).map((cq) =>
                                           cq.id === q.id ? { ...cq, note: newNote } : cq
                                         )
                                         const newTotal = newQuestions.reduce((s, cq) => s + cq.note, 0)
@@ -413,9 +413,9 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
                                   </div>
                                 </div>
                                 <p className="text-xs text-texte-secondaire">{q.justification}</p>
-                                {q.erreurs.length > 0 && (
+                                {(q.erreurs ?? []).length > 0 && (
                                   <div className="mt-2 space-y-1">
-                                    {q.erreurs.map((err, i) => (
+                                    {(q.erreurs ?? []).map((err, i) => (
                                       <p key={i} className="text-xs text-error">• {err}</p>
                                     ))}
                                   </div>
@@ -426,7 +426,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
                             {/* Comment */}
                             <div className="space-y-2">
                               <p className="text-xs font-medium text-texte-secondaire uppercase tracking-wide">
-                                Commentaire personnalise
+                                Commentaire personnalisé
                               </p>
                               <textarea
                                 value={copy.correction.commentaire}
@@ -461,7 +461,7 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
               className="gap-2"
             >
               <FileDown className="h-4 w-4" />
-              Exporter le recapitulatif
+              Exporter le récapitulatif
             </Button>
           </div>
         )}

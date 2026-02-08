@@ -4,11 +4,28 @@
 export async function callOpenAI (
   model: string,
   messages: any[],
-  apiKey: string
+  apiKey: string,
+  options?: { jsonMode?: boolean }
 ) {
   const modelMap: Record<string, string> = {
     'gpt-4o-mini': 'gpt-4o-mini-2024-07-18',
     'gpt-5-nano': 'gpt-5-nano-2025-08-07',
+  }
+
+  const body: any = {
+    model: modelMap[model] || model,
+    messages,
+  }
+
+  // GPT-5 Nano ne supporte pas temperature != 1
+  if (model !== 'gpt-5-nano') {
+    body.temperature = 0
+    body.seed = 42
+  }
+
+  // JSON mode pour forcer une sortie JSON valide
+  if (options?.jsonMode) {
+    body.response_format = { type: 'json_object' }
   }
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -17,12 +34,7 @@ export async function callOpenAI (
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: modelMap[model] || model,
-      messages,
-      temperature: 0,
-      seed: 42,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!res.ok) {
@@ -74,7 +86,8 @@ export async function callAnthropic (
 export async function callGemini (
   model: string,
   parts: any[],
-  apiKey: string
+  apiKey: string,
+  options?: { jsonMode?: boolean }
 ) {
   const modelMap: Record<string, string> = {
     'gemini-3-flash': 'gemini-3-flash-preview',
@@ -83,6 +96,13 @@ export async function callGemini (
 
   const modelName = modelMap[model] || model
 
+  const generationConfig: any = { temperature: 0 }
+
+  // JSON mode pour Gemini : responseMimeType
+  if (options?.jsonMode) {
+    generationConfig.responseMimeType = 'application/json'
+  }
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
     {
@@ -90,7 +110,13 @@ export async function callGemini (
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts }],
-        generationConfig: { temperature: 0 },
+        generationConfig,
+        safetySettings: [
+          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+        ],
       }),
     }
   )
@@ -101,6 +127,12 @@ export async function callGemini (
   }
 
   const data = await res.json()
+
+  if (!data.candidates?.length || !data.candidates[0].content?.parts?.length) {
+    const blockReason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'inconnue'
+    throw new Error(`Gemini : réponse vide (raison : ${blockReason})`)
+  }
+
   return data.candidates[0].content.parts[0].text
 }
 
@@ -169,12 +201,17 @@ export async function callMoonshot (
 export async function callXAI (
   model: string,
   messages: any[],
-  apiKey: string
+  apiKey: string,
+  options?: { jsonMode?: boolean }
 ) {
   const body: any = {
     model: 'grok-4-1-fast',
     messages,
     temperature: 0,
+  }
+
+  if (options?.jsonMode) {
+    body.response_format = { type: 'json_object' }
   }
 
   if (model === 'grok-4-1-fast-reasoning') {
@@ -406,26 +443,31 @@ function getProvider (modelId: string): string {
   return providerMap[modelId] || 'openai'
 }
 
+export interface LLMOptions {
+  jsonMode?: boolean
+}
+
 export async function callLLM (
   modelId: string,
   messages: any[],
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
+  options?: LLMOptions
 ): Promise<string> {
   const provider = getProvider(modelId)
 
   switch (provider) {
     case 'openai':
-      return callOpenAI(modelId, messages, env.OPENAI_API_KEY!)
+      return callOpenAI(modelId, messages, env.OPENAI_API_KEY!, options)
     case 'anthropic':
       return callAnthropic(modelId, messages, env.ANTHROPIC_API_KEY!)
     case 'google':
-      return callGemini(modelId, messages, env.GOOGLE_API_KEY!)
+      return callGemini(modelId, messages, env.GOOGLE_API_KEY!, options)
     case 'deepseek':
       return callDeepSeek(messages, env.DEEPSEEK_API_KEY!)
     case 'moonshot':
       return callMoonshot(modelId, messages, env.MOONSHOT_API_KEY!)
     case 'xai':
-      return callXAI(modelId, messages, env.XAI_API_KEY!)
+      return callXAI(modelId, messages, env.XAI_API_KEY!, options)
     default:
       throw new Error(`Provider inconnu: ${provider}`)
   }
