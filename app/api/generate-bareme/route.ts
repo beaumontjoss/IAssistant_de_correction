@@ -11,6 +11,12 @@ const ANTHROPIC_PREFILL_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-4-5
 // Moonshot/Kimi ne supporte PAS response_format
 const JSON_MODE_PROVIDERS = new Set(['openai', 'google', 'deepseek', 'xai'])
 
+// Prompt simple pour transcrire des images de document en texte
+const TRANSCRIPTION_DOC_PROMPT = `Transcris fidèlement et intégralement le contenu de ce document (texte, formules, tableaux, consignes).
+Utilise le format Markdown. Conserve la structure originale (titres, numérotation, sous-parties).
+Ne résume pas, ne reformule pas. Transcription mot pour mot.
+Si un passage est illisible, écris [illisible].`
+
 export async function POST (req: NextRequest) {
   const t0 = performance.now()
   const log = (step: string) => {
@@ -41,73 +47,95 @@ export async function POST (req: NextRequest) {
       XAI_API_KEY: process.env.XAI_API_KEY,
     }
 
-    // Construire le prompt
-    const prompt = getBaremePrompt(matiere, classe, '[Voir images ci-jointes]', corrigeImages?.length ? '[Voir images du corrigé ci-jointes]' : undefined)
-    log(`Prompt construit (${prompt.length} chars)`)
-
-    // Construire les images
-    const allImages: ImageContent[] = []
-
+    // ─── Préparer les images ──────────────────────────────
+    const enonceImgParsed: ImageContent[] = []
     for (const img of enonceImages) {
       const match = img.match(/^data:([^;]+);base64,(.+)$/)
       if (match) {
-        allImages.push({ mimeType: match[1], base64: match[2] })
+        enonceImgParsed.push({ mimeType: match[1], base64: match[2] })
       }
     }
 
+    const corrigeImgParsed: ImageContent[] = []
     if (corrigeImages?.length) {
       for (const img of corrigeImages) {
         const match = img.match(/^data:([^;]+);base64,(.+)$/)
         if (match) {
-          allImages.push({ mimeType: match[1], base64: match[2] })
+          corrigeImgParsed.push({ mimeType: match[1], base64: match[2] })
         }
       }
     }
 
+    const allImages = [...enonceImgParsed, ...corrigeImgParsed]
     const totalImgSize = allImages.reduce((sum, img) => sum + img.base64.length, 0)
     log(`${allImages.length} images préparées (${(totalImgSize / 1024).toFixed(0)} KB base64)`)
+
+    // ─── Construire le prompt barème ──────────────────────
+    const prompt = getBaremePrompt(matiere, classe, '[Voir images ci-jointes]', corrigeImgParsed.length ? '[Voir images du corrigé ci-jointes]' : undefined)
+    log(`Prompt construit (${prompt.length} chars)`)
 
     const provider = getProviderFromModel(modelId)
     const jsonMode = JSON_MODE_PROVIDERS.has(provider)
     const usePrefill = provider === 'anthropic' && ANTHROPIC_PREFILL_MODELS.has(modelId)
 
-    let result: string
+    // ─── Lancer en parallèle : barème + transcription énoncé + transcription corrigé ──
+    log('Appels LLM en parallèle (barème + transcriptions)...')
 
-    log('Appel LLM...')
+    // 1. Génération du barème
+    const baremePromise = (async () => {
+      let result: string
 
-    if (provider === 'google') {
-      const parts = buildMessagesWithImages(prompt, allImages, modelId)
-      result = await callLLM(modelId, parts, env, { jsonMode })
-    } else if (allImages.length > 0 && provider !== 'deepseek') {
-      const messages = buildMessagesWithImages(prompt, allImages, modelId)
+      if (provider === 'google') {
+        const parts = buildMessagesWithImages(prompt, allImages, modelId)
+        result = await callLLM(modelId, parts, env, { jsonMode })
+      } else if (allImages.length > 0 && provider !== 'deepseek') {
+        const messages = buildMessagesWithImages(prompt, allImages, modelId)
 
-      if (usePrefill) {
-        messages.push({ role: 'assistant', content: '{' })
+        if (usePrefill) {
+          messages.push({ role: 'assistant', content: '{' })
+        }
+
+        result = await callLLM(modelId, messages, env, { jsonMode })
+
+        if (usePrefill && !result.startsWith('{')) {
+          result = '{' + result
+        }
+      } else {
+        const messages = buildTextMessages('', prompt)
+
+        if (usePrefill) {
+          messages.push({ role: 'assistant', content: '{' })
+        }
+
+        result = await callLLM(modelId, messages, env, { jsonMode })
+
+        if (usePrefill && !result.startsWith('{')) {
+          result = '{' + result
+        }
       }
 
-      result = await callLLM(modelId, messages, env, { jsonMode })
+      return result
+    })()
 
-      if (usePrefill && !result.startsWith('{')) {
-        result = '{' + result
-      }
-    } else {
-      const messages = buildTextMessages('', prompt)
+    // 2. Transcription de l'énoncé (Gemini 3 Flash pour rapidité et coût)
+    const enonceTextPromise = transcribeDocImages(enonceImgParsed, env, log, 'énoncé')
 
-      if (usePrefill) {
-        messages.push({ role: 'assistant', content: '{' })
-      }
+    // 3. Transcription du corrigé (si fourni)
+    const corrigeTextPromise = corrigeImgParsed.length > 0
+      ? transcribeDocImages(corrigeImgParsed, env, log, 'corrigé')
+      : Promise.resolve(null)
 
-      result = await callLLM(modelId, messages, env, { jsonMode })
+    // Attendre les 3 résultats en parallèle
+    const [baremeResult, enonceText, corrigeText] = await Promise.all([
+      baremePromise,
+      enonceTextPromise,
+      corrigeTextPromise,
+    ])
 
-      if (usePrefill && !result.startsWith('{')) {
-        result = '{' + result
-      }
-    }
-
-    log('Réponse LLM reçue, parsing JSON...')
+    log('Réponses reçues, parsing JSON du barème...')
 
     // Parsing robuste + normalisation
-    const parsed = robustJsonParse(result)
+    const parsed = robustJsonParse(baremeResult)
     const bareme = normalizeBareme(parsed)
 
     // Si aucune question n'a pu être extraite, créer un barème minimal éditable
@@ -125,7 +153,10 @@ export async function POST (req: NextRequest) {
     }
 
     log(`✅ Terminé — ${bareme.questions.length} sections, ${bareme.total} pts`)
-    return NextResponse.json({ bareme })
+    if (enonceText) log(`📝 Énoncé transcrit (${enonceText.length} chars)`)
+    if (corrigeText) log(`📝 Corrigé transcrit (${corrigeText.length} chars)`)
+
+    return NextResponse.json({ bareme, enonceText, corrigeText })
   } catch (err: unknown) {
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
     console.error(`[BARÈME] ❌ ${elapsed}s — Erreur:`, err)
@@ -134,10 +165,33 @@ export async function POST (req: NextRequest) {
   }
 }
 
+/**
+ * Transcrit des images de document en texte via Gemini 3 Flash (rapide, multimodal, pas cher).
+ * Retourne null en cas d'erreur (non bloquant pour le barème).
+ */
+async function transcribeDocImages (
+  images: ImageContent[],
+  env: Record<string, string | undefined>,
+  log: (s: string) => void,
+  label: string
+): Promise<string | null> {
+  try {
+    const messages = buildMessagesWithImages(TRANSCRIPTION_DOC_PROMPT, images, 'gemini-3-flash')
+    const result = await callLLM('gemini-3-flash', messages, env)
+    log(`✅ Transcription ${label} terminée`)
+    return result
+  } catch (err) {
+    log(`⚠️ Transcription ${label} échouée (non bloquant) : ${err instanceof Error ? err.message : 'erreur'}`)
+    return null
+  }
+}
+
 function getProviderFromModel (modelId: string): string {
   const map: Record<string, string> = {
     'gpt-4o-mini': 'openai',
     'gpt-5-nano': 'openai',
+    'gpt-5.2-pro': 'openai',
+    'gpt-5.2': 'openai',
     'claude-haiku-4-5': 'anthropic',
     'claude-sonnet-4-5': 'anthropic',
     'claude-opus-4-6': 'anthropic',

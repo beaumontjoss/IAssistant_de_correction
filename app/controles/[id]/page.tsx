@@ -215,7 +215,8 @@ export default function ControlePage () {
           severite: controle.severite,
           baremeJson: JSON.stringify(controle.bareme),
           mdCopie: copy.transcription_md,
-          corrigeText: controle.corrige_images.length > 0 ? '[Corrigé fourni]' : null,
+          enonceText: controle.enonce_text || null,
+          corrigeText: controle.corrige_text || null,
           previousCorrections: previousCorrections.length > 0 ? previousCorrections : undefined,
         }),
       })

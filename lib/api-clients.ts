@@ -44,6 +44,8 @@ export async function callOpenAI (
   const modelMap: Record<string, string> = {
     'gpt-4o-mini': 'gpt-4o-mini-2024-07-18',
     'gpt-5-nano': 'gpt-5-nano-2025-08-07',
+    'gpt-5.2-pro': 'gpt-5.2-pro-2025-12-11',
+    'gpt-5.2': 'gpt-5.2-2025-12-11',
   }
 
   const body: any = {
@@ -102,10 +104,11 @@ export async function callAnthropic (
   const isAdaptive = ANTHROPIC_ADAPTIVE_MODELS.has(model)
 
   // Anthropic utilise un paramètre `system` de premier niveau, pas role: "system"
-  let systemPrompt: string | undefined
+  let systemContent: string | any[] | undefined
   const filteredMessages = messages.filter((m) => {
     if (m.role === 'system') {
-      systemPrompt = m.content
+      // Supporte system en string ou en tableau de blocs (pour cache_control)
+      systemContent = m.content
       return false
     }
     return true
@@ -114,24 +117,33 @@ export async function callAnthropic (
   const body: any = {
     model: modelMap[model] || model,
     messages: filteredMessages,
-    max_tokens: isAdaptive ? 16000 : 8192,
+    max_tokens: isAdaptive ? 32000 : 8192,
   }
 
   if (isAdaptive) {
     // Adaptive thinking pour Opus 4.6 — Claude décide quand et combien réfléchir
     // Pas de temperature avec adaptive thinking
-    // effort "low" pour minimiser la latence (correction de copies = tâche structurée)
+    // max_tokens à 32000 pour laisser assez de place au texte après le thinking
     body.thinking = { type: 'adaptive' }
-    body.output_config = { effort: 'low' }
   } else {
     body.temperature = 0
   }
 
-  if (systemPrompt) {
-    body.system = systemPrompt
+  if (systemContent) {
+    body.system = systemContent
   }
 
-  console.log(`[Anthropic] model=${model}, adaptive=${isAdaptive}, max_tokens=${body.max_tokens}`)
+  // Détecter si le prompt utilise du caching (blocs avec cache_control)
+  const hasCaching = Array.isArray(systemContent)
+    || filteredMessages.some((m: any) =>
+      Array.isArray(m.content) && m.content.some((b: any) => b.cache_control)
+    )
+
+  if (hasCaching) {
+    console.log(`[Anthropic] model=${model}, adaptive=${isAdaptive}, prompt_caching=ON`)
+  } else {
+    console.log(`[Anthropic] model=${model}, adaptive=${isAdaptive}, max_tokens=${body.max_tokens}`)
+  }
 
   const res = await fetchWithRetry(
     'https://api.anthropic.com/v1/messages',
@@ -154,15 +166,46 @@ export async function callAnthropic (
 
   const data = await res.json()
 
+  // Log cache performance si disponible
+  if (data.usage?.cache_read_input_tokens || data.usage?.cache_creation_input_tokens) {
+    console.log(`[Anthropic] 💾 Cache — read: ${data.usage.cache_read_input_tokens ?? 0} tokens, write: ${data.usage.cache_creation_input_tokens ?? 0} tokens, uncached: ${data.usage.input_tokens ?? 0} tokens`)
+  }
+
+  // Log stop reason pour détecter les troncatures
+  if (data.stop_reason && data.stop_reason !== 'end_turn') {
+    console.warn(`[Anthropic] ⚠️ stop_reason=${data.stop_reason} (réponse potentiellement tronquée)`)
+  }
+
   // Adaptive/thinking models peuvent renvoyer [{type:"thinking",...}, {type:"text",...}]
   // ou juste [{type:"text",...}] si Claude décide de ne pas réfléchir
   const textBlock = data.content.find((b: any) => b.type === 'text')
+
+  if (textBlock && textBlock.text.length > 10) {
+    return textBlock.text
+  }
+
+  // Fallback : si le bloc texte est trop court (< 10 chars), le thinking a peut-être
+  // consommé le budget tokens et le JSON est dans le bloc thinking.
+  // Chercher le dernier bloc JSON valide dans le thinking.
+  if (isAdaptive) {
+    const thinkingBlocks = data.content.filter((b: any) => b.type === 'thinking')
+    for (const tb of thinkingBlocks.reverse()) {
+      const thinking = tb.thinking || ''
+      // Chercher un bloc JSON dans le thinking (commence par { et finit par })
+      const jsonMatch = thinking.match(/\{[\s\S]*"note_globale"[\s\S]*\}/)
+      if (jsonMatch) {
+        console.log(`[Anthropic] 🔄 JSON extrait du bloc thinking (${jsonMatch[0].length} chars)`)
+        return jsonMatch[0]
+      }
+    }
+  }
+
   if (textBlock) {
     return textBlock.text
   }
 
   // Fallback : premier bloc
-  return data.content[0].text
+  return data.content[0]?.text || data.content[0]?.thinking || ''
 }
 
 // ─── Google Gemini ────────────────────────────────────────
@@ -470,10 +513,55 @@ export function buildTextMessages (systemPrompt: string, userText: string): any[
   ]
 }
 
+/**
+ * Construit les messages pour la correction avec prompt caching.
+ * - Anthropic : cache_control sur le contexte statique (énoncé + corrigé + barème)
+ * - OpenAI / Google : caching automatique sur les préfixes identiques, pas de markup spécial
+ *
+ * @param staticContext  Contenu identique pour toutes les copies (instructions + énoncé + corrigé + barème)
+ * @param variableContext  Contenu spécifique à la copie (corrections précédentes + copie élève)
+ * @param modelId  ID du modèle pour détecter le provider
+ */
+export function buildCorrectionMessages (
+  staticContext: string,
+  variableContext: string,
+  modelId: string
+): any[] {
+  const provider = getProvider(modelId)
+
+  if (provider === 'anthropic') {
+    // Anthropic : séparer en blocs avec cache_control sur le contexte statique
+    return [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: staticContext,
+            cache_control: { type: 'ephemeral' },
+          },
+          {
+            type: 'text',
+            text: variableContext,
+          },
+        ],
+      },
+    ]
+  }
+
+  // Tous les autres providers : un seul message user avec tout le contenu
+  // OpenAI et Google bénéficient du caching automatique de préfixe
+  return [
+    { role: 'user', content: `${staticContext}\n\n${variableContext}` },
+  ]
+}
+
 function getProvider (modelId: string): string {
   const providerMap: Record<string, string> = {
     'gpt-4o-mini': 'openai',
     'gpt-5-nano': 'openai',
+    'gpt-5.2-pro': 'openai',
+    'gpt-5.2': 'openai',
     'claude-haiku-4-5': 'anthropic',
     'claude-sonnet-4-5': 'anthropic',
     'claude-opus-4-6': 'anthropic',

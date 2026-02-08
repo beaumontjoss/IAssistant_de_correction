@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { callLLM, buildTextMessages } from '@/lib/api-clients'
-import { getCorrectionPrompt } from '@/lib/prompts'
+import { callLLM, buildCorrectionMessages } from '@/lib/api-clients'
+import { getCorrectionPromptParts } from '@/lib/prompts'
 import { robustJsonParse, normalizeCorrection } from '@/lib/json-utils'
 
 // Modèles Anthropic qui supportent le prefilling du message assistant
@@ -20,7 +20,7 @@ export async function POST (req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { modelId, matiere, classe, severite, baremeJson, mdCopie, corrigeText, previousCorrections } = body
+    const { modelId, matiere, classe, severite, baremeJson, mdCopie, enonceText, corrigeText, previousCorrections } = body
 
     if (!modelId || !matiere || !classe || !severite || !baremeJson || !mdCopie) {
       return NextResponse.json(
@@ -31,6 +31,8 @@ export async function POST (req: NextRequest) {
 
     const prevCount = Array.isArray(previousCorrections) ? previousCorrections.length : 0
     log(`Début — modèle=${modelId}, copie=${mdCopie.length} chars, barème=${baremeJson.length} chars, ${prevCount} corrections précédentes`)
+    if (enonceText) log(`📝 Énoncé fourni (${enonceText.length} chars) — sera mis en cache`)
+    if (corrigeText) log(`📝 Corrigé fourni (${corrigeText.length} chars) — sera mis en cache`)
 
     const env = {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY,
@@ -42,19 +44,22 @@ export async function POST (req: NextRequest) {
       XAI_API_KEY: process.env.XAI_API_KEY,
     }
 
-    const prompt = getCorrectionPrompt(
+    // ─── Séparer le prompt en parties cacheable / variable ───
+    const { staticContext, variableContext } = getCorrectionPromptParts(
       matiere,
       classe,
       severite,
       baremeJson,
       mdCopie,
+      enonceText || undefined,
       corrigeText || undefined,
       Array.isArray(previousCorrections) && previousCorrections.length > 0 ? previousCorrections : undefined
     )
 
-    log(`Prompt construit (${prompt.length} chars)`)
+    log(`Prompt construit — statique: ${staticContext.length} chars (cacheable), variable: ${variableContext.length} chars`)
 
-    const messages = buildTextMessages('', prompt)
+    // ─── Construire les messages avec prompt caching ───
+    const messages = buildCorrectionMessages(staticContext, variableContext, modelId)
 
     const provider = getProviderFromModel(modelId)
     const jsonMode = JSON_MODE_PROVIDERS.has(provider)
@@ -99,6 +104,8 @@ function getProviderFromModel (modelId: string): string {
   const map: Record<string, string> = {
     'gpt-4o-mini': 'openai',
     'gpt-5-nano': 'openai',
+    'gpt-5.2-pro': 'openai',
+    'gpt-5.2': 'openai',
     'claude-haiku-4-5': 'anthropic',
     'claude-sonnet-4-5': 'anthropic',
     'claude-opus-4-6': 'anthropic',

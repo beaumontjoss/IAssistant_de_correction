@@ -126,7 +126,11 @@ export default function ConfigurerPage () {
       const result = await res.json()
       if (!res.ok) throw new Error(result.error || 'Erreur lors de la génération')
 
-      update({ bareme: result.bareme })
+      update({
+        bareme: result.bareme,
+        enonce_text: result.enonceText ?? null,
+        corrige_text: result.corrigeText ?? null,
+      })
       toast.success('Barème prêt', { description: 'Vous pouvez l\'ajuster avant de continuer.' })
     } catch (err) {
       console.error(err)
@@ -316,28 +320,16 @@ export default function ConfigurerPage () {
               onChange={(severite: Severite) => update({ severite })}
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Select
-                label="Modèle pour le barème"
-                hint="IA utilisée pour générer le barème à partir de l'énoncé"
-                value={controle.modele_bareme}
-                onChange={(e) => update({ modele_bareme: e.target.value })}
-                options={CORRECTION_MODELS.map((m) => ({
-                  value: m.id,
-                  label: m.label,
-                }))}
-              />
-              <Select
-                label="Modèle de correction"
-                hint="IA utilisée pour corriger les copies des élèves"
-                value={controle.modele_correction}
-                onChange={(e) => update({ modele_correction: e.target.value })}
-                options={CORRECTION_MODELS.map((m) => ({
-                  value: m.id,
-                  label: m.label,
-                }))}
-              />
-            </div>
+            <Select
+              label="Modèle pour le barème"
+              hint="IA utilisée pour générer le barème à partir de l'énoncé"
+              value={controle.modele_bareme}
+              onChange={(e) => update({ modele_bareme: e.target.value })}
+              options={CORRECTION_MODELS.map((m) => ({
+                value: m.id,
+                label: m.label,
+              }))}
+            />
           </CardContent>
         </Card>
 

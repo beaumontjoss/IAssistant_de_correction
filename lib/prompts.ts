@@ -63,58 +63,83 @@ export function getBaremePrompt (matiere: string, classe: string, enonce: string
 
   return `Tu es un assistant pédagogique expert. Tu reçois l'énoncé d'un contrôle de ${matiere} pour une classe de ${classe}.${corrigeSection}
 
-Ta tâche : propose un barème détaillé et juste.
+Ta tâche : propose un barème détaillé et juste, avec UNE SECTION PAR QUESTION INDIVIDUELLE du contrôle.
+
+RÈGLE FONDAMENTALE DE GRANULARITÉ :
+- Crée UNE section par question ou sous-question du contrôle (ex : "1a)", "1b)", "1c)", "2)", "3)", etc.)
+- NE REGROUPE JAMAIS plusieurs questions dans une même section (pas de "Grammaire", "Compréhension", etc.)
+- Chaque section = une question que le professeur corrigera individuellement sur la copie
+- Le titre de chaque section doit décrire précisément ce que la question demande (ex : "Identifier le groupe COD de « savourait »", "Réécrire au pluriel", etc.)
+- Exception : pour une dissertation, rédaction ou dictée (pas de questions numérotées), utilise des critères thématiques
 
 ADAPTATION AU TYPE D'ÉPREUVE :
-- Pour un contrôle avec des questions/exercices : identifie chaque question et attribue des points
-- Pour une dissertation : propose des critères comme "Qualité de l'argumentation", "Structure du plan", "Qualité de la langue", "Pertinence des exemples", etc.
-- Pour une rédaction/expression écrite : propose des critères comme "Respect de la consigne", "Cohérence du récit", "Richesse du vocabulaire", "Orthographe et grammaire", etc.
-- Pour une dictée : propose des critères basés sur le nombre de fautes (orthographe lexicale, grammaticale, conjugaison, accents)
-- Pour tout autre type d'épreuve (commentaire de texte, étude de document, exercice de traduction, travail pratique, oral retranscrit, etc.) : analyse l'énoncé et propose des critères d'évaluation pertinents adaptés au format spécifique de l'épreuve
+- Contrôle avec questions/exercices : UNE section par question/sous-question. Si la question 1 a trois sous-parties a), b), c) → 3 sections séparées
+- Dissertation : critères thématiques (argumentation, structure, langue, exemples)
+- Rédaction/expression écrite : critères thématiques (consigne, cohérence, vocabulaire, orthographe)
+- Dictée : critères par type de faute (orthographe lexicale, grammaticale, conjugaison, accents)
+- Autre type : critères pertinents adaptés au format
 
-Pour chaque question/critère :
-- Identifie la question ou le critère d'évaluation
-- Attribue un nombre de points proportionnel à la difficulté et au temps de réponse attendu
-- Liste les critères d'évaluation précis (ce qui rapporte des points, ce qui en fait perdre)
+Pour chaque section :
+- Le titre décrit précisément la question posée
+- Les critères détaillent ce qui rapporte ou fait perdre des points
+- Les points sont proportionnels à la difficulté
 
-Le total de points dépend de l'épreuve (il n'est pas forcément sur 20). Adapte-le au niveau et au type de contrôle.
+Le total de points dépend de l'épreuve (pas forcément sur 20). Adapte-le au niveau et au type de contrôle.
 
-STRUCTURE :
-- Chaque section ("questions") représente une partie du contrôle (ex : "Partie A - Texte littéraire", "Exercice 1 - Géométrie", "Dissertation", etc.)
-- Chaque section contient un tableau de critères avec pour chaque critère :
-  - "question" : la référence au sous-item (ex : "1)a)", "1)b)", "2)") — laisser vide "" pour les critères thématiques (dissertation, dictée)
-  - "description" : le texte du critère d'évaluation
-  - "points" : le nombre de points attribués à ce critère
+STRUCTURE JSON :
+- Chaque élément du tableau "questions" = UNE question individuelle du contrôle
+- Chaque section a un seul critère principal (ou quelques sous-critères si la question a plusieurs attentes)
+- "question" : référence à la sous-question (ex : "1)a)", "2)") — vide "" pour les épreuves thématiques
+- "description" : ce que le critère évalue
+- "points" : points attribués
 
 IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans texte avant ni après. Pas de bloc markdown.
 
-Format de sortie JSON :
+Format de sortie JSON — exemple pour un contrôle avec questions :
 {
   "total": 40,
   "questions": [
     {
-      "id": "A",
-      "titre": "Partie A - Texte littéraire",
+      "id": "1a",
+      "titre": "Identifier le groupe COD de « savourait »",
       "criteres": [
-        { "question": "1)a)", "description": "Identifier le procédé stylistique utilisé", "points": 2 },
-        { "question": "1)b)", "description": "Expliquer l'effet produit sur le lecteur", "points": 2 },
-        { "question": "2)", "description": "Analyser le thème principal du texte", "points": 4 }
+        { "question": "1)a)", "description": "Le groupe COD est correctement identifié", "points": 1 }
+      ]
+    },
+    {
+      "id": "1b",
+      "titre": "Réécrire la phrase avec un pronom COD",
+      "criteres": [
+        { "question": "1)b)", "description": "Le pronom COD est correctement utilisé et la phrase est grammaticale", "points": 1 }
+      ]
+    },
+    {
+      "id": "2",
+      "titre": "Remplacer par des subordonnées circonstancielles de temps",
+      "criteres": [
+        { "question": "2)", "description": "Conjonction de subordination adaptée", "points": 1 },
+        { "question": "2)", "description": "Temps verbal correct dans la subordonnée", "points": 1 }
       ]
     }
   ]
 }
 
-Exemple pour une dissertation (pas de colonne question) :
+Exemple pour une dissertation (critères thématiques, pas de questions) :
 {
   "total": 20,
   "questions": [
     {
       "id": "1",
-      "titre": "Dissertation",
+      "titre": "Qualité de l'argumentation",
       "criteres": [
-        { "question": "", "description": "Qualité de l'argumentation", "points": 5 },
-        { "question": "", "description": "Structure du plan", "points": 4 },
-        { "question": "", "description": "Qualité de la langue", "points": 4 }
+        { "question": "", "description": "Arguments pertinents et bien développés", "points": 5 }
+      ]
+    },
+    {
+      "id": "2",
+      "titre": "Structure du plan",
+      "criteres": [
+        { "question": "", "description": "Plan clair avec introduction, développement et conclusion", "points": 4 }
       ]
     }
   ]
@@ -136,63 +161,54 @@ export interface PreviousCorrection {
   }>
 }
 
-export function getCorrectionPrompt (
+/**
+ * Retourne le prompt de correction séparé en deux parties :
+ * - staticContext : contenu identique pour toutes les copies d'un contrôle (cacheable)
+ * - variableContext : contenu spécifique à chaque copie (non caché)
+ */
+export function getCorrectionPromptParts (
   matiere: string,
   classe: string,
   severite: string,
   baremeJson: string,
   mdCopie: string,
+  enonce?: string,
   corrige?: string,
   previousCorrections?: PreviousCorrection[]
-): string {
-  const corrigeSection = corrige
-    ? `\nCorrigé type :\n${corrige}`
-    : ''
-
+): { staticContext: string; variableContext: string } {
   const severiteDescription: Record<string, string> = {
     indulgente: 'Indulgente : tu valorises l\'effort, les réponses partielles rapportent des points, tu es généreux sur l\'interprétation',
     classique: 'Classique : correction standard, équilibrée',
     severe: 'Sévère : tu es exigeant, les réponses doivent être précises et complètes, peu de points pour les réponses partielles',
   }
 
-  let previousSection = ''
-  if (previousCorrections && previousCorrections.length > 0) {
-    const summaries = previousCorrections.map((pc) => {
-      const questionsDetail = pc.questions
-        .map((q) => `  - ${q.titre} : ${q.note}/${q.points_max} — ${q.justification}`)
-        .join('\n')
-      return `### ${pc.nom_eleve} — ${pc.note_globale}/${pc.total}\n${questionsDetail}`
-    }).join('\n\n')
-
-    previousSection = `
-
-CORRECTIONS PRÉCÉDENTES (pour assurer l'équité de notation) :
-Les copies suivantes ont déjà été corrigées pour ce même contrôle. Tu DOIS maintenir une cohérence de notation avec ces évaluations. Pour un même niveau de réponse, attribue un nombre de points similaire. Sois juste et équitable entre les élèves.
-
-${summaries}
-`
-  }
-
   // ─── Générer la structure attendue dynamiquement depuis le barème ───
   const { sectionsList, exampleJson, evaluationInstructions } = buildBaremeStructure(baremeJson)
 
-  return `Tu es un correcteur de copies de ${matiere}, niveau ${classe}. Tu dois corriger la copie d'un élève avec rigueur et bienveillance.
+  const hasPrevious = previousCorrections && previousCorrections.length > 0
+
+  // ─── Partie statique (identique pour toutes les copies du contrôle) ───
+  const enonceSection = enonce
+    ? `\nÉnoncé du contrôle :\n${enonce}\n`
+    : ''
+
+  const corrigeSection = corrige
+    ? `\nCorrigé type :\n${corrige}\n`
+    : ''
+
+  const staticContext = `Tu es un correcteur de copies de ${matiere}, niveau ${classe}. Tu dois corriger la copie d'un élève avec rigueur et bienveillance.
 
 Sévérité de correction : ${severiteDescription[severite] || severiteDescription.classique}
-
+${enonceSection}${corrigeSection}
 Barème validé :
 ${baremeJson}
-${corrigeSection}
-${previousSection}
+
 STRUCTURE ATTENDUE DE TA RÉPONSE :
 Tu DOIS évaluer CHAQUE section du barème et retourner dans "questions" EXACTEMENT les entrées suivantes, dans cet ordre, avec les mêmes id et titre :
 
 ${sectionsList}
 
 ${evaluationInstructions}
-
-Copie de l'élève (transcription fidèle) :
-${mdCopie}
 
 Ta tâche :
 1. Évalue CHAQUE section listée ci-dessus — n'en oublie aucune, n'en fusionne aucune
@@ -202,11 +218,51 @@ Ta tâche :
 5. Calcule la note globale = somme des notes de toutes les sections
 6. Rédige un commentaire personnalisé bienveillant et constructif
 7. Liste les points pédagogiques à travailler
-${previousCorrections && previousCorrections.length > 0 ? '8. Assure la cohérence avec les corrections précédentes : même exigence, même barème appliqué\n' : ''}
+${hasPrevious ? '8. Assure la cohérence avec les corrections précédentes : même exigence, même barème appliqué\n' : ''}
 IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans texte avant ni après. Pas de bloc markdown.
 
 Format de sortie JSON EXACT :
 ${exampleJson}`
+
+  // ─── Partie variable (spécifique à chaque copie) ───
+  let previousSection = ''
+  if (hasPrevious) {
+    const summaries = previousCorrections.map((pc) => {
+      const questionsDetail = pc.questions
+        .map((q) => `  - ${q.titre} : ${q.note}/${q.points_max} — ${q.justification}`)
+        .join('\n')
+      return `### ${pc.nom_eleve} — ${pc.note_globale}/${pc.total}\n${questionsDetail}`
+    }).join('\n\n')
+
+    previousSection = `CORRECTIONS PRÉCÉDENTES (pour assurer l'équité de notation) :
+Les copies suivantes ont déjà été corrigées pour ce même contrôle. Tu DOIS maintenir une cohérence de notation avec ces évaluations. Pour un même niveau de réponse, attribue un nombre de points similaire. Sois juste et équitable entre les élèves.
+
+${summaries}
+
+`
+  }
+
+  const variableContext = `${previousSection}Copie de l'élève (transcription fidèle) :
+${mdCopie}`
+
+  return { staticContext, variableContext }
+}
+
+/** Rétrocompatibilité : retourne le prompt complet en une seule chaîne */
+export function getCorrectionPrompt (
+  matiere: string,
+  classe: string,
+  severite: string,
+  baremeJson: string,
+  mdCopie: string,
+  enonce?: string,
+  corrige?: string,
+  previousCorrections?: PreviousCorrection[]
+): string {
+  const { staticContext, variableContext } = getCorrectionPromptParts(
+    matiere, classe, severite, baremeJson, mdCopie, enonce, corrige, previousCorrections
+  )
+  return `${staticContext}\n\n${variableContext}`
 }
 
 /**

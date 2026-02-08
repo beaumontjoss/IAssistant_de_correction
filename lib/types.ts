@@ -45,6 +45,8 @@ export const TRANSCRIPTION_MODELS: TranscriptionModel[] = [
   { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', provider: 'anthropic', isMultimodal: true },
   { id: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai', isMultimodal: true },
   { id: 'gpt-5-nano', label: 'GPT-5 Nano', provider: 'openai', isMultimodal: true },
+  { id: 'gpt-5.2-pro', label: 'GPT-5.2 Pro', provider: 'openai', isMultimodal: true },
+  { id: 'gpt-5.2', label: 'GPT-5.2', provider: 'openai', isMultimodal: true },
   { id: 'grok-4', label: 'Grok 4', provider: 'xai', isMultimodal: true },
   { id: 'kimi-k2.5', label: 'Kimi K2.5', provider: 'moonshot', isMultimodal: true },
   { id: 'mistral-ocr', label: 'Mistral OCR', provider: 'mistral', isMultimodal: true },
@@ -105,6 +107,8 @@ export interface Controle {
   modele_correction: string
   enonce_images: string[]
   corrige_images: string[]
+  enonce_text: string | null
+  corrige_text: string | null
   bareme: Bareme | null
   createdAt: string
   updatedAt: string
@@ -117,10 +121,12 @@ export function createEmptyControle (): Controle {
     classe: '',
     matiere: 'Francais',
     severite: 'classique',
-    modele_bareme: 'claude-sonnet-4-5',
+    modele_bareme: 'claude-opus-4-6',
     modele_correction: 'claude-sonnet-4-5',
     enonce_images: [],
     corrige_images: [],
+    enonce_text: null,
+    corrige_text: null,
     bareme: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
