@@ -15,6 +15,12 @@ const PIPELINE = [
 ]
 
 export async function POST (req: NextRequest) {
+  const t0 = performance.now()
+  const log = (step: string) => {
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
+    console.log(`[TRANSCRIPTION] ${elapsed}s — ${step}`)
+  }
+
   try {
     const body = await req.json()
     const { images, enonceImages } = body
@@ -25,6 +31,8 @@ export async function POST (req: NextRequest) {
         { status: 400 }
       )
     }
+
+    log(`Début — ${images.length} img copie, ${enonceImages.length} img énoncé`)
 
     const env = {
       GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
@@ -50,26 +58,31 @@ export async function POST (req: NextRequest) {
       }
     }
 
+    const totalImgSize = allImages.reduce((sum, img) => sum + img.base64.length, 0)
+    log(`${allImages.length} images préparées (${(totalImgSize / 1024).toFixed(0)} KB base64)`)
+
     const errors: string[] = []
 
     // --- Tentative 1 & 2 : Gemini Flash puis Gemini Pro ---
     for (const model of PIPELINE.filter((m) => m.id !== 'mistral-ocr')) {
       try {
-        console.log(`Transcription : tentative avec ${model.label}...`)
+        log(`Tentative ${model.label}...`)
         const messages = buildMessagesWithImages(prompt, allImages, model.id)
         const result = await callLLM(model.id, messages, env)
-        console.log(`Transcription réussie avec ${model.label}`)
-        return NextResponse.json({ transcription: result, model: model.id })
+        log(`✅ Réussi avec ${model.label} (${result.length} chars)`)
+        const { transcription, nom_eleve } = extractStudentName(result)
+        if (nom_eleve) log(`📛 Nom extrait : ${nom_eleve}`)
+        return NextResponse.json({ transcription, nom_eleve, model: model.id })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Erreur inconnue'
-        console.warn(`Échec ${model.label}: ${msg}`)
+        log(`⚠️ Échec ${model.label}: ${msg}`)
         errors.push(`${model.label}: ${msg}`)
       }
     }
 
     // --- Fallback final : Mistral OCR ---
     try {
-      console.log('Transcription : fallback Mistral OCR...')
+      log('Fallback Mistral OCR...')
 
       if (!env.MISTRAL_API_KEY) {
         throw new Error('Clé API Mistral non configurée')
@@ -77,28 +90,60 @@ export async function POST (req: NextRequest) {
 
       let rawText = ''
       // Pour Mistral OCR, on n'envoie que les images de la copie (pas l'énoncé)
-      for (const img of images) {
-        const match = img.match(/^data:([^;]+);base64,(.+)$/)
+      for (let i = 0; i < images.length; i++) {
+        const match = images[i].match(/^data:([^;]+);base64,(.+)$/)
         if (!match) continue
+        log(`Mistral OCR — page ${i + 1}/${images.length}`)
         rawText += await callMistralOCR(match[2], match[1], env.MISTRAL_API_KEY)
         rawText += '\n\n'
       }
 
-      console.log('Transcription réussie avec Mistral OCR')
-      return NextResponse.json({ transcription: rawText.trim(), model: 'mistral-ocr' })
+      log(`✅ Réussi avec Mistral OCR (${rawText.length} chars)`)
+      const { transcription, nom_eleve } = extractStudentName(rawText.trim())
+      if (nom_eleve) log(`📛 Nom extrait : ${nom_eleve}`)
+      return NextResponse.json({ transcription, nom_eleve, model: 'mistral-ocr' })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue'
+      log(`❌ Échec Mistral OCR: ${msg}`)
       errors.push(`Mistral OCR: ${msg}`)
     }
 
     // Tous les modèles ont échoué
+    log('❌ Tous les modèles ont échoué')
     return NextResponse.json(
       { error: `Tous les modèles ont échoué :\n${errors.join('\n')}` },
       { status: 500 }
     )
   } catch (err: unknown) {
-    console.error('Erreur transcription:', err)
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
+    console.error(`[TRANSCRIPTION] ❌ ${elapsed}s — Erreur:`, err)
     const message = err instanceof Error ? err.message : 'Erreur inconnue'
     return NextResponse.json({ error: message }, { status: 500 })
   }
+}
+
+/**
+ * Extrait le nom de l'élève depuis la première ligne de la transcription
+ * si elle commence par "NOM:" ou "NOM :" (case-insensitive).
+ * Retourne la transcription nettoyée et le nom extrait (ou null).
+ */
+function extractStudentName (raw: string): { transcription: string; nom_eleve: string | null } {
+  const lines = raw.split('\n')
+  const firstLine = lines[0]?.trim() ?? ''
+
+  const match = firstLine.match(/^NOM\s*:\s*(.+)$/i)
+  if (match) {
+    const nom = match[1].trim()
+    // Retirer la ligne NOM: et les lignes vides qui suivent
+    let startIndex = 1
+    while (startIndex < lines.length && lines[startIndex].trim() === '') {
+      startIndex++
+    }
+    return {
+      transcription: lines.slice(startIndex).join('\n'),
+      nom_eleve: nom || null,
+    }
+  }
+
+  return { transcription: raw, nom_eleve: null }
 }

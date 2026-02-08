@@ -2,14 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   callLLM,
   callMistralOCR,
-  callGoogleVision,
-  callAzureDI,
   buildMessagesWithImages,
-  buildTextMessages,
   type ImageContent,
 } from '@/lib/api-clients'
 
-const OCR_PROVIDERS = ['mistral-ocr', 'google-vision', 'azure-di']
+const OCR_PROVIDERS = ['mistral-ocr']
 
 const SIMPLE_TRANSCRIPTION_PROMPT = `Tu es un assistant de transcription fidèle. Tu reçois une ou plusieurs images d'un document manuscrit.
 
@@ -50,9 +47,6 @@ export async function POST (req: NextRequest) {
       MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
       MOONSHOT_API_KEY: process.env.MOONSHOT_API_KEY,
       XAI_API_KEY: process.env.XAI_API_KEY,
-      GOOGLE_VISION_API_KEY: process.env.GOOGLE_VISION_API_KEY,
-      AZURE_DI_KEY: process.env.AZURE_DI_KEY,
-      AZURE_DI_ENDPOINT: process.env.AZURE_DI_ENDPOINT,
     }
 
     const startTime = Date.now()
@@ -68,16 +62,8 @@ export async function POST (req: NextRequest) {
         const mimeType = match[1]
         const base64Data = match[2]
 
-        switch (modelId) {
-          case 'mistral-ocr':
-            rawText += await callMistralOCR(base64Data, mimeType, env.MISTRAL_API_KEY!)
-            break
-          case 'google-vision':
-            rawText += await callGoogleVision(base64Data, env.GOOGLE_VISION_API_KEY!)
-            break
-          case 'azure-di':
-            rawText += await callAzureDI(base64Data, env.AZURE_DI_ENDPOINT!, env.AZURE_DI_KEY!)
-            break
+        if (modelId === 'mistral-ocr') {
+          rawText += await callMistralOCR(base64Data, mimeType, env.MISTRAL_API_KEY!)
         }
 
         rawText += '\n\n'
@@ -137,8 +123,7 @@ function getProvider (modelId: string): string {
     'gemini-3-flash': 'google',
     'gemini-3-pro': 'google',
     'kimi-k2.5': 'moonshot',
-    'grok-4-1-fast': 'xai',
-    'grok-4-1-fast-reasoning': 'xai',
+    'grok-4': 'xai',
   }
   return map[modelId] || 'openai'
 }

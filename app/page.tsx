@@ -46,7 +46,7 @@ export default function HomePage () {
 
             <div className="flex flex-col sm:flex-row gap-4 mt-10">
               <Link
-                href="/correction"
+                href="/controles"
                 className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white text-bleu-france font-bold rounded-xl hover:bg-white/90 transition-all duration-200 shadow-lg shadow-black/20 text-base"
               >
                 Commencer une correction
@@ -163,7 +163,7 @@ export default function HomePage () {
             Commencez votre première correction assistée par IA en quelques minutes.
           </p>
           <Link
-            href="/correction"
+            href="/controles"
             className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white text-bleu-france font-bold rounded-xl hover:bg-white/90 transition-all duration-200 shadow-lg shadow-black/20"
           >
             Commencer maintenant

@@ -9,13 +9,24 @@ async function fetchWithRetry (
 ): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      const t0 = performance.now()
       const res = await fetch(url, init)
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
+      console.log(`[FETCH] ${label} — ${res.status} en ${elapsed}s`)
       return res
     } catch (err) {
-      if (attempt < maxRetries) {
-        console.warn(`${label} : tentative ${attempt + 1} échouée (réseau), retry...`)
+      // Ne pas retrier si le serveur a fermé le socket (cause longue)
+      const cause = (err as any)?.cause
+      const isSlowSocketError = cause?.code === 'UND_ERR_SOCKET'
+
+      if (attempt < maxRetries && !isSlowSocketError) {
+        console.warn(`[FETCH] ${label} : tentative ${attempt + 1} échouée (réseau), retry dans ${2 * (attempt + 1)}s...`)
         await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
         continue
+      }
+
+      if (isSlowSocketError) {
+        console.error(`[FETCH] ${label} : connexion refusée par le serveur (socket closed), pas de retry`)
       }
       throw err
     }
@@ -74,6 +85,9 @@ export async function callOpenAI (
 }
 
 // ─── Anthropic ────────────────────────────────────────────
+// Opus 4.6 utilise adaptive thinking (recommandé par Anthropic, pas budget_tokens)
+const ANTHROPIC_ADAPTIVE_MODELS = new Set(['claude-opus-4-6'])
+
 export async function callAnthropic (
   model: string,
   messages: any[],
@@ -84,6 +98,8 @@ export async function callAnthropic (
     'claude-sonnet-4-5': 'claude-sonnet-4-5-20250929',
     'claude-opus-4-6': 'claude-opus-4-6',
   }
+
+  const isAdaptive = ANTHROPIC_ADAPTIVE_MODELS.has(model)
 
   // Anthropic utilise un paramètre `system` de premier niveau, pas role: "system"
   let systemPrompt: string | undefined
@@ -98,13 +114,24 @@ export async function callAnthropic (
   const body: any = {
     model: modelMap[model] || model,
     messages: filteredMessages,
-    temperature: 0,
-    max_tokens: 8192,
+    max_tokens: isAdaptive ? 16000 : 8192,
+  }
+
+  if (isAdaptive) {
+    // Adaptive thinking pour Opus 4.6 — Claude décide quand et combien réfléchir
+    // Pas de temperature avec adaptive thinking
+    // effort "low" pour minimiser la latence (correction de copies = tâche structurée)
+    body.thinking = { type: 'adaptive' }
+    body.output_config = { effort: 'low' }
+  } else {
+    body.temperature = 0
   }
 
   if (systemPrompt) {
     body.system = systemPrompt
   }
+
+  console.log(`[Anthropic] model=${model}, adaptive=${isAdaptive}, max_tokens=${body.max_tokens}`)
 
   const res = await fetchWithRetry(
     'https://api.anthropic.com/v1/messages',
@@ -126,6 +153,15 @@ export async function callAnthropic (
   }
 
   const data = await res.json()
+
+  // Adaptive/thinking models peuvent renvoyer [{type:"thinking",...}, {type:"text",...}]
+  // ou juste [{type:"text",...}] si Claude décide de ne pas réfléchir
+  const textBlock = data.content.find((b: any) => b.type === 'text')
+  if (textBlock) {
+    return textBlock.text
+  }
+
+  // Fallback : premier bloc
   return data.content[0].text
 }
 
@@ -234,7 +270,7 @@ export async function callDeepSeek (
   }
 
   const res = await fetchWithRetry(
-    'https://api.deepseek.com/v1/chat/completions',
+    'https://api.deepseek.com/chat/completions',
     {
       method: 'POST',
       headers: {
@@ -293,6 +329,7 @@ export async function callMoonshot (
 }
 
 // ─── xAI / Grok ──────────────────────────────────────────
+// Grok 4 est un reasoning model natif — pas de temperature/presencePenalty/stop
 export async function callXAI (
   model: string,
   messages: any[],
@@ -300,17 +337,12 @@ export async function callXAI (
   options?: { jsonMode?: boolean }
 ) {
   const body: any = {
-    model: 'grok-4-1-fast',
+    model: 'grok-4',
     messages,
-    temperature: 0,
   }
 
   if (options?.jsonMode) {
     body.response_format = { type: 'json_object' }
-  }
-
-  if (model === 'grok-4-1-fast-reasoning') {
-    body.reasoning = true
   }
 
   const res = await fetchWithRetry(
@@ -367,95 +399,6 @@ export async function callMistralOCR (
 
   const data = await res.json()
   return data.pages.map((p: any) => p.markdown).join('\n\n')
-}
-
-// ─── Google Cloud Vision ──────────────────────────────────
-export async function callGoogleVision (
-  imageBase64: string,
-  apiKey: string
-): Promise<string> {
-  const res = await fetchWithRetry(
-    `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        requests: [
-          {
-            image: { content: imageBase64 },
-            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
-            imageContext: { languageHints: ['fr'] },
-          },
-        ],
-      }),
-    },
-    'GoogleVision'
-  )
-
-  if (!res.ok) {
-    const error = await res.text()
-    throw new Error(`Google Vision API error: ${res.status} — ${error}`)
-  }
-
-  const data = await res.json()
-  return data.responses[0]?.textAnnotations?.[0]?.description || ''
-}
-
-// ─── Azure Document Intelligence ──────────────────────────
-export async function callAzureDI (
-  imageBase64: string,
-  endpoint: string,
-  apiKey: string
-): Promise<string> {
-  const analyzeRes = await fetchWithRetry(
-    `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Ocp-Apim-Subscription-Key': apiKey,
-      },
-      body: JSON.stringify({ base64Source: imageBase64 }),
-    },
-    'AzureDI'
-  )
-
-  if (!analyzeRes.ok) {
-    const error = await analyzeRes.text()
-    throw new Error(`Azure DI API error: ${analyzeRes.status} — ${error}`)
-  }
-
-  const operationLocation = analyzeRes.headers.get('Operation-Location')
-  if (!operationLocation) {
-    throw new Error('Azure DI: Operation-Location header missing')
-  }
-
-  // Polling for result
-  const maxAttempts = 15
-  for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((r) => setTimeout(r, 2000))
-
-    const pollRes = await fetch(operationLocation, {
-      headers: { 'Ocp-Apim-Subscription-Key': apiKey },
-    })
-
-    if (!pollRes.ok) {
-      const error = await pollRes.text()
-      throw new Error(`Azure DI polling error: ${pollRes.status} — ${error}`)
-    }
-
-    const pollData = await pollRes.json()
-
-    if (pollData.status === 'succeeded') {
-      return pollData.analyzeResult?.content || ''
-    }
-
-    if (pollData.status === 'failed') {
-      throw new Error('Azure DI analysis failed')
-    }
-  }
-
-  throw new Error('Azure DI: timeout after 30 seconds')
 }
 
 // ─── Generic dispatcher ──────────────────────────────────
@@ -539,11 +482,8 @@ function getProvider (modelId: string): string {
     'deepseek-v3.2': 'deepseek',
     'kimi-k2.5': 'moonshot',
     'kimi-k2-thinking': 'moonshot',
-    'grok-4-1-fast': 'xai',
-    'grok-4-1-fast-reasoning': 'xai',
+    'grok-4': 'xai',
     'mistral-ocr': 'mistral',
-    'google-vision': 'google-vision',
-    'azure-di': 'azure',
   }
   return providerMap[modelId] || 'openai'
 }
@@ -559,21 +499,36 @@ export async function callLLM (
   options?: LLMOptions
 ): Promise<string> {
   const provider = getProvider(modelId)
+  const t0 = performance.now()
+  console.log(`[LLM] ⏳ ${modelId} (${provider}) — appel en cours...`)
+
+  let result: string
 
   switch (provider) {
     case 'openai':
-      return callOpenAI(modelId, messages, env.OPENAI_API_KEY!, options)
+      result = await callOpenAI(modelId, messages, env.OPENAI_API_KEY!, options)
+      break
     case 'anthropic':
-      return callAnthropic(modelId, messages, env.ANTHROPIC_API_KEY!)
+      result = await callAnthropic(modelId, messages, env.ANTHROPIC_API_KEY!)
+      break
     case 'google':
-      return callGemini(modelId, messages, env.GOOGLE_API_KEY!, options)
+      result = await callGemini(modelId, messages, env.GOOGLE_API_KEY!, options)
+      break
     case 'deepseek':
-      return callDeepSeek(messages, env.DEEPSEEK_API_KEY!, options)
+      result = await callDeepSeek(messages, env.DEEPSEEK_API_KEY!, options)
+      break
     case 'moonshot':
-      return callMoonshot(modelId, messages, env.MOONSHOT_API_KEY!)
+      result = await callMoonshot(modelId, messages, env.MOONSHOT_API_KEY!)
+      break
     case 'xai':
-      return callXAI(modelId, messages, env.XAI_API_KEY!, options)
+      result = await callXAI(modelId, messages, env.XAI_API_KEY!, options)
+      break
     default:
       throw new Error(`Provider inconnu: ${provider}`)
   }
+
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
+  const chars = result.length
+  console.log(`[LLM] ✅ ${modelId} — ${elapsed}s (${chars} chars)`)
+  return result
 }

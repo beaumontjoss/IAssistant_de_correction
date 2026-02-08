@@ -3,10 +3,12 @@ export function getTranscriptionPrompt (enonce: string): string {
 
 Ta tâche :
 1. Lis attentivement chaque image de la copie
-2. Transcris FIDÈLEMENT tout ce que l'élève a écrit, en conservant TOUTES ses erreurs (orthographe, grammaire, conjugaison, contenu)
-3. Structure la transcription en Markdown
-4. Si un mot ou passage est illisible, écris [illisible]
-5. N'inclus JAMAIS le nom de l'élève
+2. Si le nom et/ou prénom de l'élève est visible sur la copie (en-tête, haut de page, page de garde, cartouche), indique-le sur la TOUTE PREMIÈRE LIGNE au format exact : NOM: Prénom Nom
+   Si aucun nom n'est visible, ne mets pas de ligne NOM.
+3. Transcris FIDÈLEMENT tout ce que l'élève a écrit, en conservant TOUTES ses erreurs (orthographe, grammaire, conjugaison, contenu)
+4. Structure la transcription en Markdown
+5. Si un mot ou passage est illisible, écris [illisible]
+6. N'inclus PAS le nom de l'élève dans le corps de la transcription (seulement dans la ligne NOM: au début)
 
 ADAPTATION AU TYPE DE COPIE :
 - Si l'énoncé contient des questions numérotées ou des exercices, structure la transcription en associant chaque réponse à la question correspondante (## Question 1, ## Question 2, etc.)
@@ -17,6 +19,7 @@ ADAPTATION AU TYPE DE COPIE :
 RÈGLE ABSOLUE : Ne corrige AUCUNE erreur de l'élève. Ta transcription doit être un miroir exact de ce qu'il a écrit.
 
 Format de sortie :
+NOM: Prénom Nom
 # Copie de l'élève
 
 [Contenu structuré selon le type de copie détecté]
@@ -121,13 +124,26 @@ Exemple pour une dissertation (pas de colonne question) :
 ${enonce}`
 }
 
+export interface PreviousCorrection {
+  nom_eleve: string
+  note_globale: number
+  total: number
+  questions: Array<{
+    titre: string
+    note: number
+    points_max: number
+    justification: string
+  }>
+}
+
 export function getCorrectionPrompt (
   matiere: string,
   classe: string,
   severite: string,
   baremeJson: string,
   mdCopie: string,
-  corrige?: string
+  corrige?: string,
+  previousCorrections?: PreviousCorrection[]
 ): string {
   const corrigeSection = corrige
     ? `\nCorrigé type :\n${corrige}`
@@ -139,6 +155,27 @@ export function getCorrectionPrompt (
     severe: 'Sévère : tu es exigeant, les réponses doivent être précises et complètes, peu de points pour les réponses partielles',
   }
 
+  let previousSection = ''
+  if (previousCorrections && previousCorrections.length > 0) {
+    const summaries = previousCorrections.map((pc) => {
+      const questionsDetail = pc.questions
+        .map((q) => `  - ${q.titre} : ${q.note}/${q.points_max} — ${q.justification}`)
+        .join('\n')
+      return `### ${pc.nom_eleve} — ${pc.note_globale}/${pc.total}\n${questionsDetail}`
+    }).join('\n\n')
+
+    previousSection = `
+
+CORRECTIONS PRÉCÉDENTES (pour assurer l'équité de notation) :
+Les copies suivantes ont déjà été corrigées pour ce même contrôle. Tu DOIS maintenir une cohérence de notation avec ces évaluations. Pour un même niveau de réponse, attribue un nombre de points similaire. Sois juste et équitable entre les élèves.
+
+${summaries}
+`
+  }
+
+  // ─── Générer la structure attendue dynamiquement depuis le barème ───
+  const { sectionsList, exampleJson, evaluationInstructions } = buildBaremeStructure(baremeJson)
+
   return `Tu es un correcteur de copies de ${matiere}, niveau ${classe}. Tu dois corriger la copie d'un élève avec rigueur et bienveillance.
 
 Sévérité de correction : ${severiteDescription[severite] || severiteDescription.classique}
@@ -146,37 +183,111 @@ Sévérité de correction : ${severiteDescription[severite] || severiteDescripti
 Barème validé :
 ${baremeJson}
 ${corrigeSection}
+${previousSection}
+STRUCTURE ATTENDUE DE TA RÉPONSE :
+Tu DOIS évaluer CHAQUE section du barème et retourner dans "questions" EXACTEMENT les entrées suivantes, dans cet ordre, avec les mêmes id et titre :
+
+${sectionsList}
+
+${evaluationInstructions}
 
 Copie de l'élève (transcription fidèle) :
 ${mdCopie}
 
 Ta tâche :
-1. Évalue chaque question/critère selon le barème
-2. Attribue une note par question (pas de demi-points en dessous de 0.5)
-3. Calcule la note globale
-4. Liste les erreurs/points à corriger avec une explication pédagogique
-5. Rédige un commentaire personnalisé bienveillant et constructif
-
+1. Évalue CHAQUE section listée ci-dessus — n'en oublie aucune, n'en fusionne aucune
+2. Pour chaque section, attribue une note entre 0 et points_max (demi-points autorisés ≥ 0.5)
+3. Justifie chaque note en détail
+4. Liste les erreurs commises pour chaque section
+5. Calcule la note globale = somme des notes de toutes les sections
+6. Rédige un commentaire personnalisé bienveillant et constructif
+7. Liste les points pédagogiques à travailler
+${previousCorrections && previousCorrections.length > 0 ? '8. Assure la cohérence avec les corrections précédentes : même exigence, même barème appliqué\n' : ''}
 IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans texte avant ni après. Pas de bloc markdown.
 
-Format de sortie JSON :
-{
-  "note_globale": 14.5,
-  "total": 20,
-  "questions": [
-    {
-      "id": "1",
-      "titre": "Question 1",
-      "note": 3,
-      "points_max": 4,
-      "justification": "...",
-      "erreurs": ["Erreur 1 : ...", "Erreur 2 : ..."]
+Format de sortie JSON EXACT :
+${exampleJson}`
+}
+
+/**
+ * Parse le barème JSON et génère la structure dynamique pour le prompt.
+ */
+function buildBaremeStructure (baremeJson: string): {
+  sectionsList: string
+  exampleJson: string
+  evaluationInstructions: string
+} {
+  let bareme: { total?: number; questions?: Array<{ id: string; titre: string; points: number; criteres?: Array<{ question: string; description: string; points: number }> }> }
+
+  try {
+    bareme = JSON.parse(baremeJson)
+  } catch {
+    // Fallback si le JSON est invalide
+    return {
+      sectionsList: '- (barème non parsable — évalue au mieux)',
+      exampleJson: '{\n  "note_globale": 0,\n  "total": 20,\n  "questions": [],\n  "points_a_corriger": [],\n  "commentaire": ""\n}',
+      evaluationInstructions: '',
     }
+  }
+
+  const sections = bareme.questions ?? []
+  const total = bareme.total ?? sections.reduce((s, q) => s + (q.points || 0), 0)
+
+  // Détecter le type d'épreuve
+  const hasQuestionRefs = sections.some((s) =>
+    (s.criteres ?? []).some((c) => c.question && c.question.trim() !== '')
+  )
+
+  // ─── Liste des sections attendues ───
+  const sectionsList = sections.map((s) => {
+    const criteresList = (s.criteres ?? []).map((c) => {
+      const ref = c.question && c.question.trim() ? `[${c.question}] ` : ''
+      return `    · ${ref}${c.description} (${c.points} pt${c.points > 1 ? 's' : ''})`
+    }).join('\n')
+
+    return `- id: "${s.id}", titre: "${s.titre}", points_max: ${s.points}\n${criteresList}`
+  }).join('\n\n')
+
+  // ─── Instructions adaptées au type d'épreuve ───
+  let evaluationInstructions = ''
+  if (hasQuestionRefs) {
+    evaluationInstructions = `POUR CHAQUE SECTION (contrôle avec questions) :
+- Identifie la réponse de l'élève correspondant à chaque question/sous-question
+- Évalue chaque critère individuellement
+- La note de la section = somme des points obtenus sur ses critères
+- Si l'élève n'a pas répondu à une question, attribue 0 et mentionne "Non traité" dans les erreurs`
+  } else {
+    evaluationInstructions = `POUR CHAQUE SECTION (évaluation thématique — dissertation, dictée, rédaction, etc.) :
+- Évalue la copie DANS SON ENSEMBLE au regard de chaque critère thématique
+- Ne cherche pas des "réponses" à des questions, mais évalue la qualité globale de la copie pour chaque axe
+- La note de la section reflète le niveau de l'élève sur ce critère transversal
+- Justifie en citant des passages ou exemples concrets tirés de la copie`
+  }
+
+  // ─── Exemple JSON dynamique ───
+  const questionsExample = sections.map((s) => {
+    return `    {
+      "id": "${s.id}",
+      "titre": "${s.titre}",
+      "note": 0,
+      "points_max": ${s.points},
+      "justification": "[Justification détaillée]",
+      "erreurs": ["[Erreur ou point à améliorer]"]
+    }`
+  }).join(',\n')
+
+  const exampleJson = `{
+  "note_globale": 0,
+  "total": ${total},
+  "questions": [
+${questionsExample}
   ],
   "points_a_corriger": [
-    "Point 1 : explication pédagogique",
-    "Point 2 : explication pédagogique"
+    "[Point pédagogique 1]",
+    "[Point pédagogique 2]"
   ],
-  "commentaire": "Commentaire personnalisé bienveillant..."
+  "commentaire": "[Commentaire personnalisé bienveillant]"
 }`
+
+  return { sectionsList, exampleJson, evaluationInstructions }
 }

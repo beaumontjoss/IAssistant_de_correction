@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import type { ControlData, CopieEleve } from './types'
+import type { Controle, CopieEleve } from './types'
 
 const BLEU_FRANCE: [number, number, number] = [0, 0, 145]
 const GRIS: [number, number, number] = [100, 100, 100]
@@ -40,11 +40,11 @@ function addFooter (doc: jsPDF) {
   }
 }
 
-export function generateStudentPDF (data: ControlData, copy: CopieEleve): void {
+export function generateStudentPDF (controle: Controle, copy: CopieEleve): void {
   if (!copy.correction) return
 
   const doc = setupDoc()
-  addHeader(doc, data.matiere, data.classe)
+  addHeader(doc, controle.matiere, controle.classe)
 
   let y = 32
 
@@ -88,7 +88,6 @@ export function generateStudentPDF (data: ControlData, copy: CopieEleve): void {
     margin: { left: 14, right: 14 },
   })
 
-  // Get final Y position after table
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 10
 
@@ -96,7 +95,7 @@ export function generateStudentPDF (data: ControlData, copy: CopieEleve): void {
   if (copy.correction.points_a_corriger.length > 0) {
     if (y > 240) {
       doc.addPage()
-      addHeader(doc, data.matiere, data.classe)
+      addHeader(doc, controle.matiere, controle.classe)
       y = 32
     }
 
@@ -110,7 +109,7 @@ export function generateStudentPDF (data: ControlData, copy: CopieEleve): void {
     for (const point of copy.correction.points_a_corriger) {
       if (y > 270) {
         doc.addPage()
-        addHeader(doc, data.matiere, data.classe)
+        addHeader(doc, controle.matiere, controle.classe)
         y = 32
       }
       const lines = doc.splitTextToSize(`• ${point}`, 175)
@@ -124,7 +123,7 @@ export function generateStudentPDF (data: ControlData, copy: CopieEleve): void {
   if (copy.correction.commentaire) {
     if (y > 240) {
       doc.addPage()
-      addHeader(doc, data.matiere, data.classe)
+      addHeader(doc, controle.matiere, controle.classe)
       y = 32
     }
 
@@ -143,12 +142,12 @@ export function generateStudentPDF (data: ControlData, copy: CopieEleve): void {
   doc.save(`Correction_${copy.nom_eleve.replace(/\s+/g, '_')}.pdf`)
 }
 
-export function generateSummaryPDF (data: ControlData): void {
-  const correctedCopies = data.copies.filter((c) => c.correction)
+export function generateSummaryPDF (controle: Controle, copies: CopieEleve[]): void {
+  const correctedCopies = copies.filter((c) => c.correction)
   if (correctedCopies.length === 0) return
 
   const doc = setupDoc()
-  addHeader(doc, data.matiere, data.classe)
+  addHeader(doc, controle.matiere, controle.classe)
 
   let y = 32
 
@@ -159,11 +158,11 @@ export function generateSummaryPDF (data: ControlData): void {
   y += 12
 
   // Main table
-  const questionHeaders = data.bareme?.questions.map((q) => q.titre.substring(0, 15)) || []
+  const questionHeaders = controle.bareme?.questions.map((q) => q.titre.substring(0, 15)) || []
   const headers = ['Élève', ...questionHeaders, 'Total']
 
   const tableData = correctedCopies.map((copy) => {
-    const questionNotes = data.bareme?.questions.map((bq) => {
+    const questionNotes = controle.bareme?.questions.map((bq) => {
       const cq = copy.correction?.questions.find((q) => q.id === bq.id)
       return cq ? `${cq.note}/${cq.points_max}` : '-'
     }) || []
@@ -214,7 +213,7 @@ export function generateSummaryPDF (data: ControlData): void {
 
   if (y > 240) {
     doc.addPage()
-    addHeader(doc, data.matiere, data.classe)
+    addHeader(doc, controle.matiere, controle.classe)
     y = 32
   }
 
@@ -245,5 +244,5 @@ export function generateSummaryPDF (data: ControlData): void {
   })
 
   addFooter(doc)
-  doc.save(`Récapitulatif_${data.classe.replace(/\s+/g, '_')}_${data.matiere}.pdf`)
+  doc.save(`Récapitulatif_${controle.classe.replace(/\s+/g, '_')}_${controle.matiere}.pdf`)
 }

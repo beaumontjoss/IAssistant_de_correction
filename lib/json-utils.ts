@@ -154,8 +154,10 @@ function normalizeCriteres (q: any): Array<{ question: string; description: stri
 /**
  * Valide et normalise une correction parsée depuis un LLM.
  * Garantit la structure attendue même si la réponse est bancale.
+ * Si un barème est fourni, aligne les questions de la correction avec celles du barème
+ * (ajoute les manquantes, corrige les points_max, recalcule les totaux).
  */
-export function normalizeCorrection (parsed: any): any | null {
+export function normalizeCorrection (parsed: any, baremeJson?: string): any | null {
   if (!parsed) return null
 
   let questions: any[] = []
@@ -178,16 +180,72 @@ export function normalizeCorrection (parsed: any): any | null {
         : [],
   }))
 
-  const noteGlobale = parsed.note_globale ?? parsed.note ?? parsed.total_eleve
-    ?? normalized.reduce((s: number, q: any) => s + q.note, 0)
+  // ─── Aligner avec le barème si fourni ───
+  let aligned = normalized
+  let expectedTotal = 0
 
-  const total = parsed.total ?? parsed.sur ?? parsed.note_max
-    ?? normalized.reduce((s: number, q: any) => s + q.points_max, 0)
+  if (baremeJson) {
+    try {
+      const bareme = JSON.parse(baremeJson)
+      const baremeQuestions: any[] = bareme.questions || []
+      expectedTotal = Number(bareme.total || 0)
+
+      if (baremeQuestions.length > 0) {
+        aligned = baremeQuestions.map((bq: any) => {
+          const bId = String(bq.id)
+          const bTitre = bq.titre || ''
+          const bPoints = Number(bq.points || 0)
+
+          // Chercher la correspondance dans la correction du LLM
+          // 1) par id exact
+          let match = normalized.find((n: any) => String(n.id) === bId)
+
+          // 2) par titre similaire (au cas où le LLM a changé l'id)
+          if (!match) {
+            match = normalized.find((n: any) =>
+              n.titre && bTitre &&
+              (n.titre.toLowerCase().includes(bTitre.toLowerCase().substring(0, 20)) ||
+               bTitre.toLowerCase().includes(n.titre.toLowerCase().substring(0, 20)))
+            )
+          }
+
+          if (match) {
+            return {
+              id: bId,
+              titre: bTitre,
+              note: Math.min(Number(match.note), bPoints), // Plafond au max
+              points_max: bPoints,
+              justification: match.justification || '',
+              erreurs: match.erreurs || [],
+            }
+          }
+
+          // Section non trouvée dans la réponse du LLM → noter 0
+          return {
+            id: bId,
+            titre: bTitre,
+            note: 0,
+            points_max: bPoints,
+            justification: 'Non évalué par le modèle.',
+            erreurs: [],
+          }
+        })
+      }
+    } catch {
+      // Barème invalide — on garde la normalisation brute
+    }
+  }
+
+  // Recalculer les totaux depuis les questions alignées
+  const noteGlobale = aligned.reduce((s: number, q: any) => s + q.note, 0)
+  const total = expectedTotal > 0
+    ? expectedTotal
+    : (parsed.total ?? parsed.sur ?? parsed.note_max ?? aligned.reduce((s: number, q: any) => s + q.points_max, 0))
 
   return {
     note_globale: Number(noteGlobale),
     total: Number(total),
-    questions: normalized,
+    questions: aligned,
     points_a_corriger: Array.isArray(parsed.points_a_corriger) ? parsed.points_a_corriger
       : Array.isArray(parsed.points_amelioration) ? parsed.points_amelioration
         : [],
