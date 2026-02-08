@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { FileUpload } from '@/components/ui/file-upload'
 import { ImageViewer } from '@/components/image-viewer/image-viewer'
 import { MarkdownEditor } from '@/components/markdown-editor/markdown-editor'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import type { ControlData, CopieEleve } from '@/lib/types'
 import { processFiles } from '@/lib/image-utils'
 import {
@@ -36,10 +37,13 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
   const [expandedCopy, setExpandedCopy] = useState<string | null>(null)
   const [transcribingId, setTranscribingId] = useState<string | null>(null)
   const [newStudentName, setNewStudentName] = useState('')
+  const [deletingCopyId, setDeletingCopyId] = useState<string | null>(null)
 
   const addCopy = useCallback(() => {
     if (!newStudentName.trim()) {
-      toast.error('Veuillez indiquer le nom de l\'élève')
+      toast.error('Nom requis', {
+        description: 'Indiquez le nom de l\'élève avant d\'ajouter sa copie.',
+      })
       return
     }
 
@@ -55,7 +59,9 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
     onUpdate({ copies: [...data.copies, newCopy] })
     setNewStudentName('')
     setExpandedCopy(newCopy.id)
-    toast.success(`Copie ajoutée pour ${newCopy.nom_eleve}`)
+    toast.success('Copie ajoutée', {
+      description: `La copie de ${newCopy.nom_eleve} est prête à recevoir des images.`,
+    })
   }, [newStudentName, data.copies, onUpdate])
 
   const updateCopy = useCallback((copyId: string, updates: Partial<CopieEleve>) => {
@@ -67,12 +73,16 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
 
   const removeCopy = useCallback((copyId: string) => {
     onUpdate({ copies: data.copies.filter((c) => c.id !== copyId) })
-    toast.success('Copie supprimée')
+    toast.success('Copie retirée', {
+      description: 'La copie a été supprimée du contrôle.',
+    })
   }, [data.copies, onUpdate])
 
   const transcribeCopy = useCallback(async (copy: CopieEleve) => {
     if (copy.images.length === 0) {
-      toast.error('Veuillez ajouter des images de la copie')
+      toast.error('Images manquantes', {
+        description: 'Ajoutez les photos de la copie avant de lancer la transcription.',
+      })
       return
     }
 
@@ -99,10 +109,15 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
         transcription_validee: false,
       })
 
-      toast.success('Transcription terminée')
+      toast.success('Transcription terminée', {
+        description: 'Relisez le texte et validez-le si tout est correct.',
+      })
     } catch (err) {
       console.error('Erreur transcription:', err)
-      toast.error(err instanceof Error ? err.message : 'Erreur lors de la transcription')
+      const msg = err instanceof Error ? err.message : 'Erreur inconnue'
+      toast.error('Échec de la transcription', {
+        description: msg,
+      })
     } finally {
       setTranscribingId(null)
     }
@@ -110,13 +125,17 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
 
   const validateTranscription = useCallback((copyId: string) => {
     updateCopy(copyId, { transcription_validee: true })
-    toast.success('Transcription validée')
+    toast.success('Transcription validée', {
+      description: 'Cette copie est prête pour la correction.',
+    })
   }, [updateCopy])
 
   const handleNext = useCallback(() => {
     const validatedCopies = data.copies.filter((c) => c.transcription_validee)
     if (validatedCopies.length === 0) {
-      toast.error('Veuillez transcrire et valider au moins une copie avant de continuer')
+      toast.error('Aucune copie validée', {
+        description: 'Transcrivez et validez au moins une copie avant de passer à la correction.',
+      })
       return
     }
     onNext()
@@ -225,7 +244,7 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation()
-                          removeCopy(copy.id)
+                          setDeletingCopyId(copy.id)
                         }}
                         className="p-2 text-texte-disabled hover:text-error rounded-lg transition-colors cursor-pointer"
                       >
@@ -389,6 +408,20 @@ export function Step3Copies ({ data, onUpdate, onNext, onPrev }: Step3CopiesProp
           <ArrowRight className="h-4 w-4" />
         </Button>
       </div>
+      {/* Confirm delete dialog */}
+      <ConfirmDialog
+        open={deletingCopyId !== null}
+        onOpenChange={(open) => { if (!open) setDeletingCopyId(null) }}
+        title="Supprimer cette copie ?"
+        description={`La copie${deletingCopyId ? ` de ${data.copies.find((c) => c.id === deletingCopyId)?.nom_eleve ?? ''}` : ''} sera définitivement supprimée, ainsi que sa transcription et sa correction éventuelle.`}
+        confirmLabel="Supprimer la copie"
+        onConfirm={() => {
+          if (deletingCopyId) {
+            removeCopy(deletingCopyId)
+            setDeletingCopyId(null)
+          }
+        }}
+      />
     </motion.div>
   )
 }

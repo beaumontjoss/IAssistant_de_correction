@@ -3,6 +3,14 @@ import { callLLM, buildTextMessages, buildMessagesWithImages, type ImageContent 
 import { getBaremePrompt } from '@/lib/prompts'
 import { robustJsonParse, normalizeBareme } from '@/lib/json-utils'
 
+// Modèles Anthropic qui supportent le prefilling du message assistant
+// Opus 4.6 a l'adaptive thinking par défaut → interdit le prefill
+const ANTHROPIC_PREFILL_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-4-5'])
+
+// Modèles qui supportent le JSON mode natif (response_format ou responseMimeType)
+// Moonshot/Kimi ne supporte PAS response_format
+const JSON_MODE_PROVIDERS = new Set(['openai', 'google', 'deepseek', 'xai'])
+
 export async function POST (req: NextRequest) {
   try {
     const body = await req.json()
@@ -48,10 +56,10 @@ export async function POST (req: NextRequest) {
     }
 
     const provider = getProviderFromModel(modelId)
+    const jsonMode = JSON_MODE_PROVIDERS.has(provider)
+    const usePrefill = provider === 'anthropic' && ANTHROPIC_PREFILL_MODELS.has(modelId)
 
     let result: string
-
-    const jsonMode = provider !== 'anthropic'
 
     if (provider === 'google') {
       const parts = buildMessagesWithImages(prompt, allImages, modelId)
@@ -59,27 +67,25 @@ export async function POST (req: NextRequest) {
     } else if (allImages.length > 0 && provider !== 'deepseek') {
       const messages = buildMessagesWithImages(prompt, allImages, modelId)
 
-      // Prefilling pour Anthropic : forcer le début du JSON
-      if (provider === 'anthropic') {
+      if (usePrefill) {
         messages.push({ role: 'assistant', content: '{' })
       }
 
       result = await callLLM(modelId, messages, env, { jsonMode })
 
-      // Reconstituer le JSON si prefill utilisé
-      if (provider === 'anthropic' && !result.startsWith('{')) {
+      if (usePrefill && !result.startsWith('{')) {
         result = '{' + result
       }
     } else {
       const messages = buildTextMessages('', prompt)
 
-      if (provider === 'anthropic') {
+      if (usePrefill) {
         messages.push({ role: 'assistant', content: '{' })
       }
 
       result = await callLLM(modelId, messages, env, { jsonMode })
 
-      if (provider === 'anthropic' && !result.startsWith('{')) {
+      if (usePrefill && !result.startsWith('{')) {
         result = '{' + result
       }
     }
@@ -97,7 +103,7 @@ export async function POST (req: NextRequest) {
           id: '1',
           titre: 'Item 1 — À compléter',
           points: 20,
-          criteres: ['Critère à définir par le professeur'],
+          criteres: [{ question: '', description: 'Critère à définir par le professeur', points: 20 }],
         },
       ]
     }

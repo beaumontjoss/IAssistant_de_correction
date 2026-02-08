@@ -8,6 +8,7 @@ import { Step1Config } from '@/components/step1-config/step1-config'
 import { Step2Bareme } from '@/components/step2-bareme/step2-bareme'
 import { Step3Copies } from '@/components/step3-copies/step3-copies'
 import { Step4Resultats } from '@/components/step4-resultats/step4-resultats'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { loadControl, saveControl, clearControl } from '@/lib/storage'
 import type { ControlData } from '@/lib/types'
 import { createEmptyControl } from '@/lib/types'
@@ -24,6 +25,7 @@ const STEPS = [
 
 export default function CorrectionPage () {
   const [data, setData] = useState<ControlData | null>(null)
+  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false)
 
   useEffect(() => {
     const loaded = loadControl()
@@ -36,7 +38,9 @@ export default function CorrectionPage () {
       const next = { ...prev, ...updates }
       const saved = saveControl(next)
       if (!saved) {
-        toast.error('Espace de stockage insuffisant. Exportez vos résultats et commencez un nouveau contrôle.')
+        toast.error('Stockage insuffisant', {
+          description: 'L\'espace de sauvegarde locale est plein. Exportez vos résultats et commencez un nouveau contrôle.',
+        })
       }
       return next
     })
@@ -47,11 +51,12 @@ export default function CorrectionPage () {
   }, [updateData])
 
   const handleReset = useCallback(() => {
-    if (confirm('Êtes-vous sûr de vouloir recommencer ? Toutes les données seront perdues.')) {
-      clearControl()
-      setData(createEmptyControl())
-      toast.success('Nouveau contrôle initialisé')
-    }
+    clearControl()
+    setData(createEmptyControl())
+    setIsResetDialogOpen(false)
+    toast.success('Contrôle réinitialisé', {
+      description: 'Un nouveau contrôle vierge a été créé.',
+    })
   }, [])
 
   if (!data) {
@@ -86,7 +91,7 @@ export default function CorrectionPage () {
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleReset}
+              onClick={() => setIsResetDialogOpen(true)}
               className="gap-1.5 text-texte-secondaire"
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -140,6 +145,16 @@ export default function CorrectionPage () {
           )}
         </AnimatePresence>
       </div>
+
+      <ConfirmDialog
+        open={isResetDialogOpen}
+        onOpenChange={setIsResetDialogOpen}
+        title="Recommencer à zéro ?"
+        description="Toutes les données du contrôle en cours seront définitivement supprimées : configuration, barème, copies et corrections."
+        confirmLabel="Tout supprimer"
+        variant="danger"
+        onConfirm={handleReset}
+      />
     </div>
   )
 }

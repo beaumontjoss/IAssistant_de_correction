@@ -73,37 +73,42 @@ function repairJson (raw: string): string {
 
 /**
  * Valide et normalise un barème parsé depuis un LLM.
- * Garantit la structure { total, questions[] } même si la réponse est bancale.
+ * Garantit la structure { total, questions[] } avec critères structurés.
  */
 export function normalizeBareme (parsed: any): { total: number; questions: any[] } {
   if (!parsed) {
     return { total: 0, questions: [] }
   }
 
-  // Extraire les questions depuis différentes clés possibles
-  let questions: any[] = []
+  // Extraire les sections depuis différentes clés possibles
+  let sections: any[] = []
 
   if (Array.isArray(parsed.questions)) {
-    questions = parsed.questions
+    sections = parsed.questions
+  } else if (Array.isArray(parsed.sections)) {
+    sections = parsed.sections
   } else if (Array.isArray(parsed.exercices)) {
-    questions = parsed.exercices
+    sections = parsed.exercices
   } else if (Array.isArray(parsed.items)) {
-    questions = parsed.items
-  } else if (Array.isArray(parsed.criteres)) {
-    questions = parsed.criteres
+    sections = parsed.items
   } else if (Array.isArray(parsed.bareme)) {
-    questions = parsed.bareme
+    sections = parsed.bareme
   } else if (Array.isArray(parsed)) {
-    questions = parsed
+    sections = parsed
   }
 
-  // Normaliser chaque question
-  const normalized = questions.map((q: any, i: number) => ({
-    id: String(q.id || q.numero || i + 1),
-    titre: q.titre || q.title || q.question || q.nom || q.name || q.intitule || `Item ${i + 1}`,
-    points: Number(q.points || q.note_max || q.max || q.bareme || 0),
-    criteres: normalizeCriteres(q),
-  }))
+  // Normaliser chaque section
+  const normalized = sections.map((q: any, i: number) => {
+    const criteres = normalizeCriteres(q)
+    const points = criteres.reduce((sum: number, c: any) => sum + (c.points || 0), 0)
+
+    return {
+      id: String(q.id || q.numero || i + 1),
+      titre: q.titre || q.title || q.nom || q.name || q.intitule || `Section ${i + 1}`,
+      points,
+      criteres,
+    }
+  })
 
   // Calculer le total
   const total = parsed.total
@@ -114,25 +119,36 @@ export function normalizeBareme (parsed: any): { total: number; questions: any[]
 }
 
 /**
- * Extrait les critères depuis un item de barème, quel que soit le format.
+ * Extrait et normalise les critères depuis un item de barème.
+ * Retourne toujours un tableau de { question, description, points }.
+ * Gère l'ancien format (string[]) et le nouveau (BaremeCritere[]).
  */
-function normalizeCriteres (q: any): string[] {
-  if (Array.isArray(q.criteres)) {
-    return q.criteres.map((c: any) => typeof c === 'string' ? c : c.description || c.critere || c.label || JSON.stringify(c))
+function normalizeCriteres (q: any): Array<{ question: string; description: string; points: number }> {
+  const raw = q.criteres || q.criteria || q.details || []
+
+  if (!Array.isArray(raw) || raw.length === 0) {
+    // Pas de critères structurés — créer un critère unique depuis la question elle-même
+    const desc = q.description || q.question || q.titre || q.title || 'Critère à préciser'
+    const pts = Number(q.points || q.note_max || q.max || 0)
+    return [{ question: '', description: typeof desc === 'string' ? desc : String(desc), points: pts }]
   }
-  if (Array.isArray(q.criteria)) {
-    return q.criteria.map((c: any) => typeof c === 'string' ? c : c.description || JSON.stringify(c))
-  }
-  if (Array.isArray(q.details)) {
-    return q.details.map((d: any) => typeof d === 'string' ? d : JSON.stringify(d))
-  }
-  if (typeof q.description === 'string') {
-    return [q.description]
-  }
-  if (typeof q.justification === 'string') {
-    return [q.justification]
-  }
-  return ['Critère à préciser']
+
+  return raw.map((c: any) => {
+    // Ancien format : critère = string simple
+    if (typeof c === 'string') {
+      // Tenter d'extraire les points depuis le texte, ex: "Critère 1 (2 pts)"
+      const ptsMatch = c.match(/\((\d+(?:[.,]\d+)?)\s*(?:pts?|points?)\)/i)
+      const pts = ptsMatch ? Number(ptsMatch[1].replace(',', '.')) : 0
+      return { question: '', description: c, points: pts }
+    }
+
+    // Nouveau format : critère = objet — garantir que tous les champs existent
+    return {
+      question: String(c.question ?? c.ref ?? c.numero ?? ''),
+      description: String(c.description ?? c.critere ?? c.label ?? c.titre ?? c.text ?? ''),
+      points: Number(c.points ?? c.pts ?? c.note_max ?? 0),
+    }
+  })
 }
 
 /**

@@ -79,11 +79,15 @@ export default function TestTranscriptionPage () {
   // --- Transcription ---
   const runTranscription = useCallback(async () => {
     if (images.length === 0) {
-      toast.error('Ajoutez au moins une image')
+      toast.error('Images manquantes', {
+        description: 'Ajoutez au moins une image avant de lancer la transcription.',
+      })
       return
     }
     if (selectedModels.size === 0) {
-      toast.error('Sélectionnez au moins un modèle')
+      toast.error('Aucun modèle sélectionné', {
+        description: 'Cochez au moins un modèle de transcription à tester.',
+      })
       return
     }
 
@@ -150,7 +154,9 @@ export default function TestTranscriptionPage () {
 
     await Promise.all(promises)
     setIsRunning(false)
-    toast.success('Transcription terminée')
+    toast.success('Test terminé', {
+      description: 'Tous les modèles ont fini leur transcription.',
+    })
   }, [images, selectedModels])
 
   // --- Download .md ---
@@ -168,7 +174,9 @@ export default function TestTranscriptionPage () {
   // --- Copy to clipboard ---
   const copyToClipboard = useCallback((text: string) => {
     navigator.clipboard.writeText(text)
-    toast.success('Copié dans le presse-papiers')
+    toast.success('Copié', {
+      description: 'Le texte a été copié dans le presse-papiers.',
+    })
   }, [])
 
   return (

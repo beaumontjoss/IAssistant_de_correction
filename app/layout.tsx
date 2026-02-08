@@ -25,9 +25,20 @@ export default function RootLayout ({
         {children}
         <Toaster
           position="top-right"
+          richColors
+          closeButton
+          gap={8}
           toastOptions={{
-            style: {
-              fontFamily: 'var(--font-marianne)',
+            unstyled: true,
+            classNames: {
+              toast: 'toast-custom',
+              title: 'toast-title',
+              description: 'toast-description',
+              closeButton: 'toast-close',
+              success: 'toast-success',
+              error: 'toast-error',
+              info: 'toast-info',
+              warning: 'toast-warning',
             },
           }}
         />

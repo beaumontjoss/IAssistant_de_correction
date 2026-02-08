@@ -1,5 +1,28 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+// ─── Helper : fetch avec retry automatique sur erreurs réseau ──
+async function fetchWithRetry (
+  url: string,
+  init: RequestInit,
+  label: string,
+  maxRetries = 2
+): Promise<Response> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, init)
+      return res
+    } catch (err) {
+      if (attempt < maxRetries) {
+        console.warn(`${label} : tentative ${attempt + 1} échouée (réseau), retry...`)
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
+        continue
+      }
+      throw err
+    }
+  }
+  throw new Error(`${label} : échec réseau après ${maxRetries + 1} tentatives`)
+}
+
 // ─── OpenAI ───────────────────────────────────────────────
 export async function callOpenAI (
   model: string,
@@ -28,14 +51,18 @@ export async function callOpenAI (
     body.response_format = { type: 'json_object' }
   }
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+  const res = await fetchWithRetry(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  })
+    'OpenAI'
+  )
 
   if (!res.ok) {
     const error = await res.text()
@@ -58,20 +85,40 @@ export async function callAnthropic (
     'claude-opus-4-6': 'claude-opus-4-6',
   }
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: modelMap[model] || model,
-      messages,
-      temperature: 0,
-      max_tokens: 8192,
-    }),
+  // Anthropic utilise un paramètre `system` de premier niveau, pas role: "system"
+  let systemPrompt: string | undefined
+  const filteredMessages = messages.filter((m) => {
+    if (m.role === 'system') {
+      systemPrompt = m.content
+      return false
+    }
+    return true
   })
+
+  const body: any = {
+    model: modelMap[model] || model,
+    messages: filteredMessages,
+    temperature: 0,
+    max_tokens: 8192,
+  }
+
+  if (systemPrompt) {
+    body.system = systemPrompt
+  }
+
+  const res = await fetchWithRetry(
+    'https://api.anthropic.com/v1/messages',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
+    },
+    'Anthropic'
+  )
 
   if (!res.ok) {
     const error = await res.text()
@@ -98,27 +145,59 @@ export async function callGemini (
 
   const generationConfig: any = { temperature: 0 }
 
-  // JSON mode pour Gemini : responseMimeType
   if (options?.jsonMode) {
     generationConfig.responseMimeType = 'application/json'
   }
 
-  const res = await fetch(
+  // Si les parts contiennent des messages OpenAI-style (role: system/user),
+  // extraire le system en systemInstruction et convertir en parts Gemini
+  let systemInstruction: string | undefined
+  let actualParts = parts
+
+  if (parts.length > 0 && parts[0]?.role) {
+    actualParts = []
+    for (const msg of parts) {
+      if (msg.role === 'system') {
+        systemInstruction = msg.content
+      } else if (msg.role === 'user') {
+        if (typeof msg.content === 'string') {
+          actualParts.push({ text: msg.content })
+        } else if (Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block.type === 'text') {
+              actualParts.push({ text: block.text })
+            }
+          }
+        }
+      } else if (msg.role === 'assistant') {
+        // prefill — ignorer pour Gemini
+      }
+    }
+  }
+
+  const body: any = {
+    contents: [{ parts: actualParts }],
+    generationConfig,
+    safetySettings: [
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+    ],
+  }
+
+  if (systemInstruction) {
+    body.systemInstruction = { parts: [{ text: systemInstruction }] }
+  }
+
+  const res = await fetchWithRetry(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig,
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        ],
-      }),
-    }
+      body: JSON.stringify(body),
+    },
+    'Gemini'
   )
 
   if (!res.ok) {
@@ -139,21 +218,33 @@ export async function callGemini (
 // ─── DeepSeek ─────────────────────────────────────────────
 export async function callDeepSeek (
   messages: any[],
-  apiKey: string
+  apiKey: string,
+  options?: { jsonMode?: boolean }
 ) {
-  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+  const body: any = {
+    model: 'deepseek-chat',
+    messages,
+    temperature: 0,
+    seed: 42,
+  }
+
+  // DeepSeek supporte response_format json_object
+  if (options?.jsonMode) {
+    body.response_format = { type: 'json_object' }
+  }
+
+  const res = await fetchWithRetry(
+    'https://api.deepseek.com/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages,
-      temperature: 0,
-      seed: 42,
-    }),
-  })
+    'DeepSeek'
+  )
 
   if (!res.ok) {
     const error = await res.text()
@@ -175,18 +266,22 @@ export async function callMoonshot (
     'kimi-k2-thinking': 'kimi-k2-thinking',
   }
 
-  const res = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+  const res = await fetchWithRetry(
+    'https://api.moonshot.cn/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: modelMap[model] || model,
+        messages,
+        temperature: 0,
+      }),
     },
-    body: JSON.stringify({
-      model: modelMap[model] || model,
-      messages,
-      temperature: 0,
-    }),
-  })
+    'Moonshot'
+  )
 
   if (!res.ok) {
     const error = await res.text()
@@ -218,14 +313,18 @@ export async function callXAI (
     body.reasoning = true
   }
 
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+  const res = await fetchWithRetry(
+    'https://api.x.ai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  })
+    'xAI'
+  )
 
   if (!res.ok) {
     const error = await res.text()
@@ -242,20 +341,24 @@ export async function callMistralOCR (
   mimeType: string,
   apiKey: string
 ): Promise<string> {
-  const res = await fetch('https://api.mistral.ai/v1/ocr', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'mistral-ocr-latest',
-      document: {
-        type: 'image_url',
-        image_url: `data:${mimeType};base64,${imageBase64}`,
+  const res = await fetchWithRetry(
+    'https://api.mistral.ai/v1/ocr',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
       },
-    }),
-  })
+      body: JSON.stringify({
+        model: 'mistral-ocr-latest',
+        document: {
+          type: 'image_url',
+          image_url: `data:${mimeType};base64,${imageBase64}`,
+        },
+      }),
+    },
+    'MistralOCR'
+  )
 
   if (!res.ok) {
     const error = await res.text()
@@ -271,7 +374,7 @@ export async function callGoogleVision (
   imageBase64: string,
   apiKey: string
 ): Promise<string> {
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
     {
       method: 'POST',
@@ -285,7 +388,8 @@ export async function callGoogleVision (
           },
         ],
       }),
-    }
+    },
+    'GoogleVision'
   )
 
   if (!res.ok) {
@@ -303,7 +407,7 @@ export async function callAzureDI (
   endpoint: string,
   apiKey: string
 ): Promise<string> {
-  const analyzeRes = await fetch(
+  const analyzeRes = await fetchWithRetry(
     `${endpoint}/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30`,
     {
       method: 'POST',
@@ -312,7 +416,8 @@ export async function callAzureDI (
         'Ocp-Apim-Subscription-Key': apiKey,
       },
       body: JSON.stringify({ base64Source: imageBase64 }),
-    }
+    },
+    'AzureDI'
   )
 
   if (!analyzeRes.ok) {
@@ -463,7 +568,7 @@ export async function callLLM (
     case 'google':
       return callGemini(modelId, messages, env.GOOGLE_API_KEY!, options)
     case 'deepseek':
-      return callDeepSeek(messages, env.DEEPSEEK_API_KEY!)
+      return callDeepSeek(messages, env.DEEPSEEK_API_KEY!, options)
     case 'moonshot':
       return callMoonshot(modelId, messages, env.MOONSHOT_API_KEY!)
     case 'xai':

@@ -76,25 +76,46 @@ Pour chaque question/critère :
 
 Le total de points dépend de l'épreuve (il n'est pas forcément sur 20). Adapte-le au niveau et au type de contrôle.
 
+STRUCTURE :
+- Chaque section ("questions") représente une partie du contrôle (ex : "Partie A - Texte littéraire", "Exercice 1 - Géométrie", "Dissertation", etc.)
+- Chaque section contient un tableau de critères avec pour chaque critère :
+  - "question" : la référence au sous-item (ex : "1)a)", "1)b)", "2)") — laisser vide "" pour les critères thématiques (dissertation, dictée)
+  - "description" : le texte du critère d'évaluation
+  - "points" : le nombre de points attribués à ce critère
+
 IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans texte avant ni après. Pas de bloc markdown.
 
 Format de sortie JSON :
 {
-  "total": <total adapté à l'épreuve>,
+  "total": 40,
   "questions": [
     {
-      "id": "1",
-      "titre": "Question 1 - [intitulé] ou Critère : [nom du critère]",
-      "points": 4,
+      "id": "A",
+      "titre": "Partie A - Texte littéraire",
       "criteres": [
-        "Critère 1 : ... (X pts)",
-        "Critère 2 : ... (X pts)"
+        { "question": "1)a)", "description": "Identifier le procédé stylistique utilisé", "points": 2 },
+        { "question": "1)b)", "description": "Expliquer l'effet produit sur le lecteur", "points": 2 },
+        { "question": "2)", "description": "Analyser le thème principal du texte", "points": 4 }
       ]
     }
   ]
 }
 
-Note : chaque item de "questions" peut être une question, un exercice, ou un critère thématique (ex : "Orthographe", "Qualité de l'argumentation", etc.) selon le type d'épreuve.
+Exemple pour une dissertation (pas de colonne question) :
+{
+  "total": 20,
+  "questions": [
+    {
+      "id": "1",
+      "titre": "Dissertation",
+      "criteres": [
+        { "question": "", "description": "Qualité de l'argumentation", "points": 5 },
+        { "question": "", "description": "Structure du plan", "points": 4 },
+        { "question": "", "description": "Qualité de la langue", "points": 4 }
+      ]
+    }
+  ]
+}
 
 Énoncé :
 ${enonce}`

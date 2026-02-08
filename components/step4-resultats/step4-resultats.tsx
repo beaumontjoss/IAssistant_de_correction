@@ -123,10 +123,18 @@ export function Step4Resultats ({ data, onUpdate, onPrev }: Step4ResultatsProps)
         c.id === copy.id ? { ...c, correction: result.correction as Correction } : c
       )
       onUpdate({ copies: newCopies })
-      toast.success(`Copie de ${copy.nom_eleve} corrigée`)
+      toast.success(`${copy.nom_eleve} — Corrigée`, {
+        description: 'La correction est disponible. Vous pouvez la consulter et l\'ajuster.',
+      })
     } catch (err) {
       console.error('Erreur correction:', err)
-      toast.error(err instanceof Error ? err.message : 'Erreur lors de la correction')
+      const msg = err instanceof Error ? err.message : 'Erreur inconnue'
+      const isNetwork = msg.includes('fetch failed') || msg.includes('Failed to fetch') || msg.includes('NetworkError')
+      toast.error(isNetwork ? 'Problème de connexion' : 'Échec de la correction', {
+        description: isNetwork
+          ? 'Impossible de joindre le serveur. Vérifiez votre connexion internet et réessayez.'
+          : msg,
+      })
     } finally {
       setCorrectingIds((prev) => {
         const next = new Set(prev)

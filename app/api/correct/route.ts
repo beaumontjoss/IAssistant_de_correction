@@ -3,6 +3,14 @@ import { callLLM, buildTextMessages } from '@/lib/api-clients'
 import { getCorrectionPrompt } from '@/lib/prompts'
 import { robustJsonParse, normalizeCorrection } from '@/lib/json-utils'
 
+// Modèles Anthropic qui supportent le prefilling du message assistant
+// Opus 4.6 a l'adaptive thinking par défaut → interdit le prefill
+const ANTHROPIC_PREFILL_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-4-5'])
+
+// Modèles qui supportent le JSON mode natif (response_format ou responseMimeType)
+// Moonshot/Kimi ne supporte PAS response_format
+const JSON_MODE_PROVIDERS = new Set(['openai', 'google', 'deepseek', 'xai'])
+
 export async function POST (req: NextRequest) {
   try {
     const body = await req.json()
@@ -36,18 +44,17 @@ export async function POST (req: NextRequest) {
 
     const messages = buildTextMessages('', prompt)
 
-    // Prefilling pour Anthropic
     const provider = getProviderFromModel(modelId)
-    const jsonMode = provider !== 'anthropic'
+    const jsonMode = JSON_MODE_PROVIDERS.has(provider)
+    const usePrefill = provider === 'anthropic' && ANTHROPIC_PREFILL_MODELS.has(modelId)
 
-    if (provider === 'anthropic') {
+    if (usePrefill) {
       messages.push({ role: 'assistant', content: '{' })
     }
 
     let result = await callLLM(modelId, messages, env, { jsonMode })
 
-    // Reconstituer le JSON si prefill utilisé
-    if (provider === 'anthropic' && !result.startsWith('{')) {
+    if (usePrefill && !result.startsWith('{')) {
       result = '{' + result
     }
 

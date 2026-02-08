@@ -27,11 +27,15 @@ interface Step1ConfigProps {
 export function Step1Config ({ data, onUpdate, onNext }: Step1ConfigProps) {
   const handleValidate = useCallback(() => {
     if (!data.classe.trim()) {
-      toast.error('Veuillez indiquer la classe')
+      toast.error('Champ manquant', {
+        description: 'Veuillez indiquer la classe avant de continuer.',
+      })
       return
     }
     if (data.enonce_images.length === 0) {
-      toast.error('Veuillez ajouter au moins une image de l\'énoncé')
+      toast.error('Énoncé requis', {
+        description: 'Ajoutez au moins une image de l\'énoncé pour pouvoir générer le barème.',
+      })
       return
     }
     onNext()

@@ -61,11 +61,17 @@ export const CORRECTION_MODELS: CorrectionModel[] = [
 
 export const TEXT_ONLY_MODELS = ['deepseek-v3.2', 'kimi-k2-thinking']
 
+export interface BaremeCritere {
+  question: string      // réf. comme "1)a)", "2)" — vide pour les critères thématiques (dissertation)
+  description: string   // texte du critère
+  points: number        // points pour ce critère
+}
+
 export interface BaremeQuestion {
   id: string
   titre: string
   points: number
-  criteres: string[]
+  criteres: BaremeCritere[]
 }
 
 export interface Bareme {
