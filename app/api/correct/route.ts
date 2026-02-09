@@ -1,3 +1,5 @@
+export const maxDuration = 300
+
 import { NextRequest, NextResponse } from 'next/server'
 import { callLLM, buildCorrectionMessages } from '@/lib/api-clients'
 import { getCorrectionPromptParts, CORRECTION_JSON_SCHEMA } from '@/lib/prompts'
