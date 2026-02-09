@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:llm": "bun run scripts/test-llm.ts",
+    "test:llm:verbose": "bun run scripts/test-llm.ts --verbose"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",

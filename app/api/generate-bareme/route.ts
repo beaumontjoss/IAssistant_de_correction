@@ -2,19 +2,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { callLLM, buildTextMessages, buildMessagesWithImages, type ImageContent } from '@/lib/api-clients'
 import { getBaremePrompt } from '@/lib/prompts'
 import { robustJsonParse, normalizeBareme } from '@/lib/json-utils'
+import { logLLMCall } from '@/lib/llm-logger'
 
 // Modèles Anthropic qui supportent le prefilling du message assistant
 // Opus 4.6 a l'adaptive thinking par défaut → interdit le prefill
 const ANTHROPIC_PREFILL_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-4-5'])
 
 // Modèles qui supportent le JSON mode natif (response_format ou responseMimeType)
-// Moonshot/Kimi ne supporte PAS response_format
-const JSON_MODE_PROVIDERS = new Set(['openai', 'google', 'deepseek', 'xai'])
+const JSON_MODE_PROVIDERS = new Set(['openai', 'openai-responses', 'google', 'deepseek', 'xai', 'moonshot'])
 
-// Prompt simple pour transcrire des images de document en texte
-const TRANSCRIPTION_DOC_PROMPT = `Transcris fidèlement et intégralement le contenu de ce document (texte, formules, tableaux, consignes).
+// Prompt pour transcrire des images de document en texte (inclut gestion des visuels)
+const TRANSCRIPTION_DOC_PROMPT = `Transcris fidèlement et intégralement le contenu de ce document.
 Utilise le format Markdown. Conserve la structure originale (titres, numérotation, sous-parties).
 Ne résume pas, ne reformule pas. Transcription mot pour mot.
+
+Pour les éléments visuels (graphiques, schémas, figures, cartes, diagrammes) :
+- Décris-les en détail entre balises [FIGURE: ...]
+- Précise : type de visuel, axes et légendes, valeurs chiffrées, formes géométriques, relations spatiales, couleurs significatives
+- Exemple : [FIGURE: Graphique en barres montrant la température moyenne (°C) en ordonnée et les mois (Jan-Déc) en abscisse. Valeurs : Jan=5, Fév=6, Mar=10, Avr=13, Mai=17, Jun=21, Jul=24, Aoû=23, Sep=20, Oct=15, Nov=9, Déc=6]
+- Exemple : [FIGURE: Triangle ABC rectangle en A. AB = 5 cm, AC = 12 cm. Angle B marqué α. Hauteur AH tracée vers BC.]
+
+Pour les tableaux, utilise la syntaxe Markdown de tableau.
+Pour les formules mathématiques, utilise la notation LaTeX entre $ ou $$.
 Si un passage est illisible, écris [illisible].`
 
 export async function POST (req: NextRequest) {
@@ -133,6 +142,7 @@ export async function POST (req: NextRequest) {
     ])
 
     log('Réponses reçues, parsing JSON du barème...')
+    const elapsedMs = performance.now() - t0
 
     // Parsing robuste + normalisation
     const parsed = robustJsonParse(baremeResult)
@@ -151,6 +161,24 @@ export async function POST (req: NextRequest) {
         },
       ]
     }
+
+    // Log asynchrone (non bloquant) — sans les images base64 pour limiter la taille
+    logLLMCall({
+      type: 'bareme',
+      model: modelId,
+      provider,
+      prompt: { full: prompt },
+      messages: [{ role: 'user', content: `${prompt}\n\n[${allImages.length} images jointes — non incluses dans le log]` }],
+      options: { jsonMode, prefill: usePrefill },
+      response_raw: baremeResult,
+      response_parsed: bareme,
+      meta: {
+        elapsed_ms: Math.round(elapsedMs),
+        timestamp: new Date().toISOString(),
+        images_count: allImages.length,
+        images_size_kb: Math.round(totalImgSize / 1024),
+      },
+    })
 
     log(`✅ Terminé — ${bareme.questions.length} sections, ${bareme.total} pts`)
     if (enonceText) log(`📝 Énoncé transcrit (${enonceText.length} chars)`)
@@ -190,7 +218,7 @@ function getProviderFromModel (modelId: string): string {
   const map: Record<string, string> = {
     'gpt-4o-mini': 'openai',
     'gpt-5-nano': 'openai',
-    'gpt-5.2-pro': 'openai',
+    'gpt-5.2-pro': 'openai-responses',
     'gpt-5.2': 'openai',
     'claude-haiku-4-5': 'anthropic',
     'claude-sonnet-4-5': 'anthropic',

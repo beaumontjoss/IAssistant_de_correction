@@ -34,7 +34,7 @@ async function fetchWithRetry (
   throw new Error(`${label} : échec réseau après ${maxRetries + 1} tentatives`)
 }
 
-// ─── OpenAI ───────────────────────────────────────────────
+// ─── OpenAI Chat Completions ──────────────────────────────
 export async function callOpenAI (
   model: string,
   messages: any[],
@@ -44,7 +44,6 @@ export async function callOpenAI (
   const modelMap: Record<string, string> = {
     'gpt-4o-mini': 'gpt-4o-mini-2024-07-18',
     'gpt-5-nano': 'gpt-5-nano-2025-08-07',
-    'gpt-5.2-pro': 'gpt-5.2-pro-2025-12-11',
     'gpt-5.2': 'gpt-5.2-2025-12-11',
   }
 
@@ -84,6 +83,100 @@ export async function callOpenAI (
 
   const data = await res.json()
   return data.choices[0].message.content
+}
+
+// ─── OpenAI Responses API (GPT-5.2 Pro, etc.) ────────────
+// Ces modèles ne supportent PAS Chat Completions, uniquement /v1/responses
+const OPENAI_RESPONSES_MODELS = new Set(['gpt-5.2-pro'])
+
+export async function callOpenAIResponses (
+  model: string,
+  messages: any[],
+  apiKey: string,
+  options?: { jsonMode?: boolean }
+) {
+  const modelMap: Record<string, string> = {
+    'gpt-5.2-pro': 'gpt-5.2-pro-2025-12-11',
+  }
+
+  // Extraire les instructions (system) et l'input (user) depuis les messages
+  let instructions: string | undefined
+  const inputItems: any[] = []
+
+  for (const msg of messages) {
+    if (msg.role === 'system') {
+      instructions = typeof msg.content === 'string' ? msg.content : ''
+    } else if (msg.role === 'user') {
+      inputItems.push({
+        role: 'user',
+        content: typeof msg.content === 'string'
+          ? msg.content
+          : msg.content,
+      })
+    } else if (msg.role === 'assistant') {
+      inputItems.push({
+        role: 'assistant',
+        content: typeof msg.content === 'string'
+          ? msg.content
+          : msg.content,
+      })
+    }
+  }
+
+  const body: any = {
+    model: modelMap[model] || model,
+    input: inputItems.length === 1 && typeof inputItems[0].content === 'string'
+      ? inputItems[0].content
+      : inputItems,
+    store: false,
+    reasoning: { effort: 'medium' },
+  }
+
+  if (instructions) {
+    body.instructions = instructions
+  }
+
+  if (options?.jsonMode) {
+    body.text = { format: { type: 'json_object' } }
+  }
+
+  console.log(`[OpenAI Responses] model=${model}, reasoning=medium, input_items=${inputItems.length}`)
+
+  const res = await fetchWithRetry(
+    'https://api.openai.com/v1/responses',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    },
+    'OpenAI-Responses'
+  )
+
+  if (!res.ok) {
+    const error = await res.text()
+    throw new Error(`OpenAI Responses API error: ${res.status} — ${error}`)
+  }
+
+  const data = await res.json()
+
+  // Log token usage
+  if (data.usage) {
+    const cached = data.usage.input_tokens_details?.cached_tokens ?? 0
+    console.log(`[OpenAI Responses] 💾 Tokens — input: ${data.usage.input_tokens} (cached: ${cached}), output: ${data.usage.output_tokens}`)
+  }
+
+  // Extraire le texte de la réponse
+  const messageOutput = data.output?.find((o: any) => o.type === 'message')
+  const textContent = messageOutput?.content?.find((c: any) => c.type === 'output_text')
+
+  if (!textContent?.text) {
+    throw new Error('OpenAI Responses API : réponse vide ou format inattendu')
+  }
+
+  return textContent.text
 }
 
 // ─── Anthropic ────────────────────────────────────────────
@@ -338,26 +431,44 @@ export async function callDeepSeek (
 export async function callMoonshot (
   model: string,
   messages: any[],
-  apiKey: string
+  apiKey: string,
+  options?: { jsonMode?: boolean }
 ) {
   const modelMap: Record<string, string> = {
     'kimi-k2.5': 'kimi-k2.5',
     'kimi-k2-thinking': 'kimi-k2-thinking',
   }
 
+  const isK25 = model === 'kimi-k2.5'
+  const isThinking = model === 'kimi-k2-thinking'
+
+  const body: any = {
+    model: modelMap[model] || model,
+    messages,
+  }
+
+  // kimi-k2.5 : temperature non modifiable, thinking activé par défaut
+  if (isK25) {
+    body.thinking = { type: 'enabled' }
+  } else if (isThinking) {
+    // kimi-k2-thinking : temperature par défaut 1.0, pas modifiable recommandé
+  } else {
+    body.temperature = 0
+  }
+
+  if (options?.jsonMode) {
+    body.response_format = { type: 'json_object' }
+  }
+
   const res = await fetchWithRetry(
-    'https://api.moonshot.cn/v1/chat/completions',
+    'https://api.moonshot.ai/v1/chat/completions',
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: modelMap[model] || model,
-        messages,
-        temperature: 0,
-      }),
+      body: JSON.stringify(body),
     },
     'Moonshot'
   )
@@ -368,6 +479,12 @@ export async function callMoonshot (
   }
 
   const data = await res.json()
+
+  // Log cache automatique Moonshot si présent
+  if (data.usage?.cached_tokens) {
+    console.log(`[Moonshot] 💾 Cache — cached: ${data.usage.cached_tokens} tokens`)
+  }
+
   return data.choices[0].message.content
 }
 
@@ -518,39 +635,83 @@ export function buildTextMessages (systemPrompt: string, userText: string): any[
  * - Anthropic : cache_control sur le contexte statique (énoncé + corrigé + barème)
  * - OpenAI / Google : caching automatique sur les préfixes identiques, pas de markup spécial
  *
- * @param staticContext  Contenu identique pour toutes les copies (instructions + énoncé + corrigé + barème)
- * @param variableContext  Contenu spécifique à la copie (corrections précédentes + copie élève)
- * @param modelId  ID du modèle pour détecter le provider
+ * Si des images sont fournies (SEND_IMAGES=true), elles sont ajoutées au contexte statique
+ * pour que le LLM puisse voir les figures, schémas et graphiques de l'énoncé/corrigé.
+ * Le texte transcrit reste toujours inclus (pour le caching et les modèles text-only).
+ *
+ * @param staticContext   Contenu identique pour toutes les copies (instructions + énoncé + corrigé + barème)
+ * @param variableContext Contenu spécifique à la copie (corrections précédentes + copie élève)
+ * @param modelId         ID du modèle pour détecter le provider
+ * @param images          Images optionnelles de l'énoncé/corrigé à joindre
  */
 export function buildCorrectionMessages (
   staticContext: string,
   variableContext: string,
-  modelId: string
+  modelId: string,
+  images?: ImageContent[]
 ): any[] {
   const provider = getProvider(modelId)
+  const hasImages = images && images.length > 0
 
   if (provider === 'anthropic') {
-    // Anthropic : séparer en blocs avec cache_control sur le contexte statique
-    return [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: staticContext,
-            cache_control: { type: 'ephemeral' },
-          },
-          {
-            type: 'text',
-            text: variableContext,
-          },
-        ],
-      },
-    ]
+    const contentBlocks: any[] = []
+
+    // Images en premier (dans le bloc statique cacheable)
+    if (hasImages) {
+      for (const img of images) {
+        contentBlocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
+        })
+      }
+    }
+
+    // Texte statique (cacheable) — toujours présent
+    contentBlocks.push({
+      type: 'text',
+      text: staticContext,
+      cache_control: { type: 'ephemeral' },
+    })
+
+    // Texte variable (copie de l'élève)
+    contentBlocks.push({
+      type: 'text',
+      text: variableContext,
+    })
+
+    return [{ role: 'user', content: contentBlocks }]
   }
 
-  // Tous les autres providers : un seul message user avec tout le contenu
-  // OpenAI et Google bénéficient du caching automatique de préfixe
+  if (provider === 'google') {
+    // Gemini : format spécifique pour les images
+    const parts: any[] = []
+
+    if (hasImages) {
+      for (const img of images) {
+        parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } })
+      }
+    }
+
+    parts.push({ text: `${staticContext}\n\n${variableContext}` })
+    return parts
+  }
+
+  // OpenAI-compatible (OpenAI, xAI, Moonshot, DeepSeek)
+  if (hasImages) {
+    const contentBlocks: any[] = images.map((img) => ({
+      type: 'image_url',
+      image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+    }))
+
+    contentBlocks.push({
+      type: 'text',
+      text: `${staticContext}\n\n${variableContext}`,
+    })
+
+    return [{ role: 'user', content: contentBlocks }]
+  }
+
+  // Pas d'images — message texte simple
   return [
     { role: 'user', content: `${staticContext}\n\n${variableContext}` },
   ]
@@ -560,7 +721,7 @@ function getProvider (modelId: string): string {
   const providerMap: Record<string, string> = {
     'gpt-4o-mini': 'openai',
     'gpt-5-nano': 'openai',
-    'gpt-5.2-pro': 'openai',
+    'gpt-5.2-pro': 'openai-responses',
     'gpt-5.2': 'openai',
     'claude-haiku-4-5': 'anthropic',
     'claude-sonnet-4-5': 'anthropic',
@@ -596,6 +757,9 @@ export async function callLLM (
     case 'openai':
       result = await callOpenAI(modelId, messages, env.OPENAI_API_KEY!, options)
       break
+    case 'openai-responses':
+      result = await callOpenAIResponses(modelId, messages, env.OPENAI_API_KEY!, options)
+      break
     case 'anthropic':
       result = await callAnthropic(modelId, messages, env.ANTHROPIC_API_KEY!)
       break
@@ -606,7 +770,7 @@ export async function callLLM (
       result = await callDeepSeek(messages, env.DEEPSEEK_API_KEY!, options)
       break
     case 'moonshot':
-      result = await callMoonshot(modelId, messages, env.MOONSHOT_API_KEY!)
+      result = await callMoonshot(modelId, messages, env.MOONSHOT_API_KEY!, options)
       break
     case 'xai':
       result = await callXAI(modelId, messages, env.XAI_API_KEY!, options)
