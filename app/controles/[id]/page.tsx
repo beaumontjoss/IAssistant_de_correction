@@ -217,8 +217,6 @@ export default function ControlePage () {
           mdCopie: copy.transcription_md,
           enonceText: controle.enonce_text || null,
           corrigeText: controle.corrige_text || null,
-          enonceImages: controle.enonce_images || [],
-          corrigeImages: controle.corrige_images || [],
           previousCorrections: previousCorrections.length > 0 ? previousCorrections : undefined,
         }),
       })

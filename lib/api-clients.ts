@@ -635,83 +635,39 @@ export function buildTextMessages (systemPrompt: string, userText: string): any[
  * - Anthropic : cache_control sur le contexte statique (énoncé + corrigé + barème)
  * - OpenAI / Google : caching automatique sur les préfixes identiques, pas de markup spécial
  *
- * Si des images sont fournies (SEND_IMAGES=true), elles sont ajoutées au contexte statique
- * pour que le LLM puisse voir les figures, schémas et graphiques de l'énoncé/corrigé.
- * Le texte transcrit reste toujours inclus (pour le caching et les modèles text-only).
- *
  * @param staticContext   Contenu identique pour toutes les copies (instructions + énoncé + corrigé + barème)
  * @param variableContext Contenu spécifique à la copie (corrections précédentes + copie élève)
  * @param modelId         ID du modèle pour détecter le provider
- * @param images          Images optionnelles de l'énoncé/corrigé à joindre
  */
 export function buildCorrectionMessages (
   staticContext: string,
   variableContext: string,
-  modelId: string,
-  images?: ImageContent[]
+  modelId: string
 ): any[] {
   const provider = getProvider(modelId)
-  const hasImages = images && images.length > 0
 
   if (provider === 'anthropic') {
-    const contentBlocks: any[] = []
-
-    // Images en premier (dans le bloc statique cacheable)
-    if (hasImages) {
-      for (const img of images) {
-        contentBlocks.push({
-          type: 'image',
-          source: { type: 'base64', media_type: img.mimeType, data: img.base64 },
-        })
-      }
-    }
-
-    // Texte statique (cacheable) — toujours présent
-    contentBlocks.push({
-      type: 'text',
-      text: staticContext,
-      cache_control: { type: 'ephemeral' },
-    })
-
-    // Texte variable (copie de l'élève)
-    contentBlocks.push({
-      type: 'text',
-      text: variableContext,
-    })
-
-    return [{ role: 'user', content: contentBlocks }]
+    // Anthropic : séparer en blocs avec cache_control sur le contexte statique
+    return [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: staticContext,
+            cache_control: { type: 'ephemeral' },
+          },
+          {
+            type: 'text',
+            text: variableContext,
+          },
+        ],
+      },
+    ]
   }
 
-  if (provider === 'google') {
-    // Gemini : format spécifique pour les images
-    const parts: any[] = []
-
-    if (hasImages) {
-      for (const img of images) {
-        parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } })
-      }
-    }
-
-    parts.push({ text: `${staticContext}\n\n${variableContext}` })
-    return parts
-  }
-
-  // OpenAI-compatible (OpenAI, xAI, Moonshot, DeepSeek)
-  if (hasImages) {
-    const contentBlocks: any[] = images.map((img) => ({
-      type: 'image_url',
-      image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
-    }))
-
-    contentBlocks.push({
-      type: 'text',
-      text: `${staticContext}\n\n${variableContext}`,
-    })
-
-    return [{ role: 'user', content: contentBlocks }]
-  }
-
-  // Pas d'images — message texte simple
+  // Tous les autres providers : un seul message user avec tout le contenu
+  // OpenAI et Google bénéficient du caching automatique de préfixe
   return [
     { role: 'user', content: `${staticContext}\n\n${variableContext}` },
   ]
