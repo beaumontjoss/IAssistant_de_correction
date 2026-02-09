@@ -58,6 +58,7 @@ export default function ControlePage () {
   const [transcribingId, setTranscribingId] = useState<string | null>(null)
   const [correctingIds, setCorrectingIds] = useState<Set<string>>(new Set())
   const [deletingCopyId, setDeletingCopyId] = useState<string | null>(null)
+  const [reuploadCopyId, setReuploadCopyId] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('nom')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
@@ -177,6 +178,18 @@ export default function ControlePage () {
   const validateTranscription = useCallback(async (copyId: string) => {
     await updateCopy(copyId, { transcription_validee: true })
     toast.success('Transcription validée')
+  }, [updateCopy])
+
+  const reuploadCopy = useCallback(async (copyId: string) => {
+    await updateCopy(copyId, {
+      images: [],
+      transcription_md: null,
+      transcription_validee: false,
+      correction: null,
+    })
+    setReuploadCopyId(null)
+    setExpandedCopy(copyId)
+    toast.success('Copie réinitialisée', { description: 'Vous pouvez réuploader les images.' })
   }, [updateCopy])
 
   // ─── Correction ────────────────────────────────────────
@@ -502,29 +515,31 @@ export default function ControlePage () {
                               className="overflow-hidden"
                             >
                               <div className="px-5 pb-5 border-t border-bordure pt-5 space-y-5">
-                                {/* Upload images */}
-                                <FileUpload
-                                  label="Photos de la copie"
-                                  hint="Images de la copie manuscrite"
-                                  files={copy.images}
-                                  onFilesChange={(files) => updateCopy(copy.id, { images: files })}
-                                  processFiles={(files) => processFiles(files)}
-                                />
+                                {/* Upload images — masqué après transcription */}
+                                {!copy.transcription_md ? (
+                                  <>
+                                    <FileUpload
+                                      label="Photos de la copie"
+                                      hint="Images de la copie manuscrite"
+                                      files={copy.images}
+                                      onFilesChange={(files) => updateCopy(copy.id, { images: files })}
+                                      processFiles={(files) => processFiles(files)}
+                                    />
 
-                                {/* Transcription button */}
-                                {copy.images.length > 0 && !copy.transcription_md && (
-                                  <Button
-                                    onClick={() => transcribeCopy(copy)}
-                                    isLoading={isTranscribing}
-                                    className="gap-2 w-full"
-                                  >
-                                    {!isTranscribing && <FileText className="h-4 w-4" />}
-                                    {isTranscribing ? 'Transcription en cours...' : 'Transcrire cette copie'}
-                                  </Button>
-                                )}
-
-                                {/* Transcription result */}
-                                {copy.transcription_md && (
+                                    {/* Transcription button */}
+                                    {copy.images.length > 0 && (
+                                      <Button
+                                        onClick={() => transcribeCopy(copy)}
+                                        isLoading={isTranscribing}
+                                        className="gap-2 w-full"
+                                      >
+                                        {!isTranscribing && <FileText className="h-4 w-4" />}
+                                        {isTranscribing ? 'Transcription en cours...' : 'Transcrire cette copie'}
+                                      </Button>
+                                    )}
+                                  </>
+                                ) : (
+                                  /* Transcription result */
                                   <div className="space-y-4">
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                       <div>
@@ -543,20 +558,24 @@ export default function ControlePage () {
 
                                     <div className="flex gap-3">
                                       {!copy.transcription_validee ? (
-                                        <>
-                                          <Button onClick={() => validateTranscription(copy.id)} className="gap-2">
-                                            <CheckCircle2 className="h-4 w-4" />
-                                            Valider
-                                          </Button>
-                                          <Button variant="outline" onClick={() => transcribeCopy(copy)} isLoading={isTranscribing} className="gap-2">
-                                            Retranscrire
-                                          </Button>
-                                        </>
+                                        <Button onClick={() => validateTranscription(copy.id)} className="gap-2">
+                                          <CheckCircle2 className="h-4 w-4" />
+                                          Valider la transcription
+                                        </Button>
                                       ) : (
                                         <Button variant="ghost" onClick={() => updateCopy(copy.id, { transcription_validee: false })} className="gap-2">
+                                          <Edit3 className="h-3.5 w-3.5" />
                                           Modifier la transcription
                                         </Button>
                                       )}
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => setReuploadCopyId(copy.id)}
+                                        className="gap-2"
+                                      >
+                                        <RotateCcw className="h-3.5 w-3.5" />
+                                        Réuploader la copie
+                                      </Button>
                                     </div>
                                   </div>
                                 )}
@@ -841,6 +860,16 @@ export default function ControlePage () {
         description={`La copie${deletingCopyId ? ` de ${copies.find((c) => c.id === deletingCopyId)?.nom_eleve ?? ''}` : ''} sera définitivement supprimée.`}
         confirmLabel="Supprimer la copie"
         onConfirm={() => { if (deletingCopyId) removeCopy(deletingCopyId) }}
+      />
+
+      {/* Reupload copy dialog */}
+      <ConfirmDialog
+        open={reuploadCopyId !== null}
+        onOpenChange={(open) => { if (!open) setReuploadCopyId(null) }}
+        title="Réuploader cette copie ?"
+        description="Les images actuelles, la transcription et la correction seront supprimées. Vous devrez réuploader les photos et relancer la transcription."
+        confirmLabel="Réuploader"
+        onConfirm={() => { if (reuploadCopyId) reuploadCopy(reuploadCopyId) }}
       />
     </div>
   )

@@ -6,6 +6,7 @@ import {
   type ImageContent,
 } from '@/lib/api-clients'
 import { getTranscriptionPrompt } from '@/lib/prompts'
+import { logLLMCall } from '@/lib/llm-logger'
 
 // Pipeline fixe : Gemini 3 Flash → Gemini 3 Pro → Mistral OCR
 const PIPELINE = [
@@ -72,6 +73,25 @@ export async function POST (req: NextRequest) {
         log(`✅ Réussi avec ${model.label} (${result.length} chars)`)
         const { transcription, nom_eleve } = extractStudentName(result)
         if (nom_eleve) log(`📛 Nom extrait : ${nom_eleve}`)
+
+        logLLMCall({
+          type: 'transcription-copie',
+          model: model.id,
+          provider: 'google',
+          prompt: { full: prompt },
+          messages: [{ role: 'user', content: `${prompt}\n\n[${allImages.length} images jointes — non incluses dans le log]` }],
+          options: {},
+          response_raw: result,
+          response_parsed: { transcription, nom_eleve },
+          meta: {
+            elapsed_ms: Math.round(performance.now() - t0),
+            timestamp: new Date().toISOString(),
+            images_count: allImages.length,
+            images_size_kb: Math.round(totalImgSize / 1024),
+            failed_models: errors.length > 0 ? errors : undefined,
+          },
+        })
+
         return NextResponse.json({ transcription, nom_eleve, model: model.id })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Erreur inconnue'
@@ -101,6 +121,24 @@ export async function POST (req: NextRequest) {
       log(`✅ Réussi avec Mistral OCR (${rawText.length} chars)`)
       const { transcription, nom_eleve } = extractStudentName(rawText.trim())
       if (nom_eleve) log(`📛 Nom extrait : ${nom_eleve}`)
+
+      logLLMCall({
+        type: 'transcription-copie',
+        model: 'mistral-ocr',
+        provider: 'mistral',
+        prompt: { full: '[Mistral OCR — images envoyées individuellement, pas de prompt textuel]' },
+        messages: [{ role: 'user', content: `[Mistral OCR — ${images.length} pages de copie]` }],
+        options: {},
+        response_raw: rawText.trim(),
+        response_parsed: { transcription, nom_eleve },
+        meta: {
+          elapsed_ms: Math.round(performance.now() - t0),
+          timestamp: new Date().toISOString(),
+          images_count: images.length,
+          failed_models: errors,
+        },
+      })
+
       return NextResponse.json({ transcription, nom_eleve, model: 'mistral-ocr' })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue'

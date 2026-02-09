@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { callLLM, buildCorrectionMessages } from '@/lib/api-clients'
-import { getCorrectionPromptParts } from '@/lib/prompts'
+import { getCorrectionPromptParts, CORRECTION_JSON_SCHEMA } from '@/lib/prompts'
 import { robustJsonParse, normalizeCorrection } from '@/lib/json-utils'
 import { logLLMCall } from '@/lib/llm-logger'
 
@@ -64,13 +64,20 @@ export async function POST (req: NextRequest) {
     const provider = getProviderFromModel(modelId)
     const jsonMode = JSON_MODE_PROVIDERS.has(provider)
     const usePrefill = provider === 'anthropic' && ANTHROPIC_PREFILL_MODELS.has(modelId)
+    const useStructuredOutput = provider === 'anthropic' && !ANTHROPIC_PREFILL_MODELS.has(modelId)
 
     if (usePrefill) {
       messages.push({ role: 'assistant', content: '{' })
     }
 
+    const llmOptions: Record<string, any> = { jsonMode }
+    if (useStructuredOutput) {
+      llmOptions.anthropicSchema = CORRECTION_JSON_SCHEMA
+      log('Structured outputs activés (Anthropic json_schema)')
+    }
+
     log('Appel LLM...')
-    let result = await callLLM(modelId, messages, env, { jsonMode })
+    let result = await callLLM(modelId, messages, env, llmOptions)
     const elapsedMs = performance.now() - t0
 
     if (usePrefill && !result.startsWith('{')) {

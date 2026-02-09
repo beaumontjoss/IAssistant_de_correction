@@ -58,12 +58,10 @@ ${enonce}`
 
 export function getBaremePrompt (matiere: string, classe: string, enonce: string, corrige?: string): string {
   const corrigeSection = corrige
-    ? `\n\nTu reçois également le corrigé type :\n${corrige}`
+    ? `\n\n<corrige>\n${corrige}\n</corrige>`
     : ''
 
-  return `Tu es un assistant pédagogique expert. Tu reçois l'énoncé d'un contrôle de ${matiere} pour une classe de ${classe}.${corrigeSection}
-
-Ta tâche : propose un barème détaillé et juste, avec UNE SECTION PAR QUESTION INDIVIDUELLE du contrôle.
+  return `Tu es un assistant pédagogique expert. Ta tâche : proposer un barème détaillé et juste pour un contrôle de ${matiere} (classe de ${classe}).
 
 RÈGLE FONDAMENTALE DE GRANULARITÉ :
 - Crée UNE section par question ou sous-question du contrôle (ex : "1a)", "1b)", "1c)", "2)", "3)", etc.)
@@ -77,7 +75,6 @@ ADAPTATION AU TYPE D'ÉPREUVE :
 - Dissertation : critères thématiques (argumentation, structure, langue, exemples)
 - Rédaction/expression écrite : critères thématiques (consigne, cohérence, vocabulaire, orthographe)
 - Dictée : critères par type de faute (orthographe lexicale, grammaticale, conjugaison, accents)
-- Autre type : critères pertinents adaptés au format
 
 Pour chaque section :
 - Le titre décrit précisément la question posée
@@ -86,67 +83,88 @@ Pour chaque section :
 
 Le total de points dépend de l'épreuve (pas forcément sur 20). Adapte-le au niveau et au type de contrôle.
 
-STRUCTURE JSON :
-- Chaque élément du tableau "questions" = UNE question individuelle du contrôle
-- Chaque section a un seul critère principal (ou quelques sous-critères si la question a plusieurs attentes)
-- "question" : référence à la sous-question (ex : "1)a)", "2)") — vide "" pour les épreuves thématiques
-- "description" : ce que le critère évalue
-- "points" : points attribués
+Réponds UNIQUEMENT avec du JSON valide.
 
-IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans texte avant ni après. Pas de bloc markdown.
-
-Format de sortie JSON — exemple pour un contrôle avec questions :
-{
-  "total": 40,
-  "questions": [
-    {
-      "id": "1a",
-      "titre": "Identifier le groupe COD de « savourait »",
-      "criteres": [
-        { "question": "1)a)", "description": "Le groupe COD est correctement identifié", "points": 1 }
-      ]
-    },
-    {
-      "id": "1b",
-      "titre": "Réécrire la phrase avec un pronom COD",
-      "criteres": [
-        { "question": "1)b)", "description": "Le pronom COD est correctement utilisé et la phrase est grammaticale", "points": 1 }
-      ]
-    },
-    {
-      "id": "2",
-      "titre": "Remplacer par des subordonnées circonstancielles de temps",
-      "criteres": [
-        { "question": "2)", "description": "Conjonction de subordination adaptée", "points": 1 },
-        { "question": "2)", "description": "Temps verbal correct dans la subordonnée", "points": 1 }
-      ]
-    }
-  ]
+<enonce>
+${enonce}
+</enonce>${corrigeSection}`
 }
 
-Exemple pour une dissertation (critères thématiques, pas de questions) :
-{
-  "total": 20,
-  "questions": [
-    {
-      "id": "1",
-      "titre": "Qualité de l'argumentation",
-      "criteres": [
-        { "question": "", "description": "Arguments pertinents et bien développés", "points": 5 }
-      ]
+/**
+ * Schéma JSON pour les structured outputs Anthropic (barème).
+ * Utilisé avec output_config.format pour garantir un JSON valide.
+ */
+export const BAREME_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    total: { type: 'number', description: 'Total de points du barème' },
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Identifiant de la question (ex: "1a", "2")' },
+          titre: { type: 'string', description: 'Description précise de la question' },
+          criteres: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                question: { type: 'string', description: 'Référence à la sous-question (ex: "1)a)") ou vide' },
+                description: { type: 'string', description: 'Ce que le critère évalue' },
+                points: { type: 'number', description: 'Points attribués' },
+              },
+              required: ['question', 'description', 'points'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['id', 'titre', 'criteres'],
+        additionalProperties: false,
+      },
     },
-    {
-      "id": "2",
-      "titre": "Structure du plan",
-      "criteres": [
-        { "question": "", "description": "Plan clair avec introduction, développement et conclusion", "points": 4 }
-      ]
-    }
-  ]
+  },
+  required: ['total', 'questions'],
+  additionalProperties: false,
 }
 
-Énoncé :
-${enonce}`
+/**
+ * Schéma JSON pour les structured outputs Anthropic (correction).
+ */
+export const CORRECTION_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    note_globale: { type: 'number', description: 'Note totale attribuée à la copie' },
+    total: { type: 'number', description: 'Total de points du barème' },
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Identifiant de la question (correspondant au barème)' },
+          titre: { type: 'string', description: 'Titre de la question' },
+          note: { type: 'number', description: 'Points attribués pour cette question' },
+          points_max: { type: 'number', description: 'Points maximum pour cette question' },
+          justification: { type: 'string', description: 'Explication détaillée de la note' },
+          erreurs: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Liste des erreurs identifiées',
+          },
+        },
+        required: ['id', 'titre', 'note', 'points_max', 'justification', 'erreurs'],
+        additionalProperties: false,
+      },
+    },
+    points_a_corriger: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Conseils d\'amélioration pour l\'élève',
+    },
+    commentaire: { type: 'string', description: 'Commentaire global sur la copie' },
+  },
+  required: ['note_globale', 'total', 'questions', 'points_a_corriger', 'commentaire'],
+  additionalProperties: false,
 }
 
 export interface PreviousCorrection {

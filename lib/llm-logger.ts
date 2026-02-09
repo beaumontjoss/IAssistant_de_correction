@@ -4,7 +4,7 @@ import { join } from 'path'
 const LOG_DIR = join(process.cwd(), 'logs_appels_llm')
 
 export interface LLMLogEntry {
-  type: 'correction' | 'bareme' | 'transcription'
+  type: 'correction' | 'bareme' | 'transcription' | 'transcription-doc' | 'transcription-copie'
   model: string
   provider: string
   prompt: {

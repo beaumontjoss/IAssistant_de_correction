@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { FileUpload } from '@/components/ui/file-upload'
+import { ImageViewer } from '@/components/image-viewer/image-viewer'
+import { MarkdownEditor } from '@/components/markdown-editor/markdown-editor'
 import { SeverityToggle } from '@/components/ui/severity-toggle'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { getControle, saveControle } from '@/lib/db'
@@ -30,6 +32,8 @@ import {
   Trash2,
   Sparkles,
   ClipboardList,
+  RotateCcw,
+  FileText,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -49,6 +53,8 @@ export default function ConfigurerPage () {
   const [isSaving, setIsSaving] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [loadingStep, setLoadingStep] = useState(0)
+  const [reuploadTarget, setReuploadTarget] = useState<'enonce' | 'corrige' | null>(null)
+  const [transcribingDoc, setTranscribingDoc] = useState<'enonce' | 'corrige' | null>(null)
 
   // Load contrôle
   useEffect(() => {
@@ -66,6 +72,46 @@ export default function ConfigurerPage () {
   const update = useCallback((updates: Partial<Controle>) => {
     setControle((prev) => prev ? { ...prev, ...updates } : prev)
   }, [])
+
+  const handleReupload = useCallback((target: 'enonce' | 'corrige') => {
+    if (target === 'enonce') {
+      // Réinitialiser l'énoncé + barème + transcription énoncé (le barème en dépend)
+      update({ enonce_images: [], enonce_text: null, bareme: null })
+      toast.success('Énoncé réinitialisé', { description: 'Uploadez les nouvelles images et régénérez le barème.' })
+    } else {
+      // Réinitialiser le corrigé uniquement (le barème peut rester, il sera régénéré si besoin)
+      update({ corrige_images: [], corrige_text: null })
+      toast.success('Corrigé réinitialisé', { description: 'Uploadez les nouvelles images.' })
+    }
+    setReuploadTarget(null)
+  }, [update])
+
+  const transcribeDoc = useCallback(async (target: 'enonce' | 'corrige') => {
+    if (!controle) return
+    const images = target === 'enonce' ? controle.enonce_images : controle.corrige_images
+    if (images.length === 0) return
+
+    setTranscribingDoc(target)
+    try {
+      const res = await fetch('/api/transcribe-doc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images }),
+      })
+      const result = await res.json()
+      if (!res.ok) throw new Error(result.error || 'Erreur de transcription')
+
+      const textField = target === 'enonce' ? 'enonce_text' : 'corrige_text'
+      update({ [textField]: result.text })
+      toast.success('Transcription terminée', { description: 'Relisez et ajustez si nécessaire.' })
+    } catch (err) {
+      console.error(err)
+      const msg = err instanceof Error ? err.message : 'Erreur inconnue'
+      toast.error('Échec de la transcription', { description: msg })
+    } finally {
+      setTranscribingDoc(null)
+    }
+  }, [controle, update])
 
   const handleSave = useCallback(async () => {
     if (!controle) return
@@ -120,6 +166,8 @@ export default function ConfigurerPage () {
           classe: controle.classe,
           enonceImages: controle.enonce_images,
           corrigeImages: controle.corrige_images,
+          enonceText: controle.enonce_text ?? undefined,
+          corrigeText: controle.corrige_text ?? undefined,
         }),
       })
 
@@ -141,16 +189,6 @@ export default function ConfigurerPage () {
       setLoadingStep(0)
     }
   }, [controle, update])
-
-  // Auto-generate on mount if no barème but has images
-  const hasAutoTriggered = useRef(false)
-  useEffect(() => {
-    if (!controle || hasAutoTriggered.current) return
-    if (!controle.bareme && controle.enonce_images.length > 0 && controle.classe.trim()) {
-      hasAutoTriggered.current = true
-      generateBareme()
-    }
-  }, [controle]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Barème handlers ───────────────────────────────────
   const sections = useMemo(() => controle?.bareme?.questions ?? [], [controle?.bareme])
@@ -262,21 +300,115 @@ export default function ConfigurerPage () {
               </div>
             </div>
 
-            <FileUpload
-              label="Énoncé du contrôle"
-              hint="Images ou PDF de l'énoncé. Formats acceptés : JPG, PNG, PDF"
-              files={controle.enonce_images}
-              onFilesChange={(files) => update({ enonce_images: files })}
-              processFiles={(files) => processFiles(files)}
-            />
+            {/* Énoncé */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-texte-primaire">Énoncé du contrôle</p>
+              {!controle.enonce_text ? (
+                /* Pas encore transcrit → upload (ajout de pages possible) + bouton Transcrire */
+                <div className="space-y-3">
+                  <FileUpload
+                    label=""
+                    hint="Images ou PDF de l'énoncé. Formats acceptés : JPG, PNG, PDF"
+                    files={controle.enonce_images}
+                    onFilesChange={(files) => update({ enonce_images: files })}
+                    processFiles={(files) => processFiles(files)}
+                  />
+                  {controle.enonce_images.length > 0 && (
+                    <Button
+                      onClick={() => transcribeDoc('enonce')}
+                      isLoading={transcribingDoc === 'enonce'}
+                      className="gap-2 w-full"
+                    >
+                      {transcribingDoc !== 'enonce' && <FileText className="h-4 w-4" />}
+                      {transcribingDoc === 'enonce' ? 'Transcription en cours...' : 'Transcrire l\'énoncé'}
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                /* État 3 : transcription faite → side-by-side */
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs font-medium text-texte-secondaire mb-2">Images originales</p>
+                      <ImageViewer images={controle.enonce_images} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-texte-secondaire mb-2">Transcription</p>
+                      <MarkdownEditor
+                        value={controle.enonce_text}
+                        onChange={(value) => update({ enonce_text: value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setReuploadTarget('enonce')}
+                      className="gap-2"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Modifier l&apos;énoncé
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
 
-            <FileUpload
-              label="Corrigé (optionnel)"
-              hint="Le corrigé type du contrôle, si disponible"
-              files={controle.corrige_images}
-              onFilesChange={(files) => update({ corrige_images: files })}
-              processFiles={(files) => processFiles(files)}
-            />
+            {/* Corrigé */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-texte-primaire">Corrigé (optionnel)</p>
+              {!controle.corrige_text ? (
+                /* Pas encore transcrit → upload (ajout de pages possible) + bouton Transcrire */
+                <div className="space-y-3">
+                  <FileUpload
+                    label=""
+                    hint="Le corrigé type du contrôle, si disponible"
+                    files={controle.corrige_images}
+                    onFilesChange={(files) => update({ corrige_images: files })}
+                    processFiles={(files) => processFiles(files)}
+                  />
+                  {controle.corrige_images.length > 0 && (
+                    <Button
+                      onClick={() => transcribeDoc('corrige')}
+                      isLoading={transcribingDoc === 'corrige'}
+                      className="gap-2 w-full"
+                    >
+                      {transcribingDoc !== 'corrige' && <FileText className="h-4 w-4" />}
+                      {transcribingDoc === 'corrige' ? 'Transcription en cours...' : 'Transcrire le corrigé'}
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                /* État 3 : transcription faite → side-by-side */
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs font-medium text-texte-secondaire mb-2">Images originales</p>
+                      <ImageViewer images={controle.corrige_images} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-texte-secondaire mb-2">Transcription</p>
+                      <MarkdownEditor
+                        value={controle.corrige_text}
+                        onChange={(value) => update({ corrige_text: value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setReuploadTarget('corrige')}
+                      className="gap-2"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Modifier le corrigé
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -482,6 +614,20 @@ export default function ConfigurerPage () {
           </Button>
         </div>
       </div>
+
+      {/* Reupload confirmation dialog */}
+      <ConfirmDialog
+        open={reuploadTarget !== null}
+        onOpenChange={(open) => { if (!open) setReuploadTarget(null) }}
+        title={reuploadTarget === 'enonce' ? 'Modifier l\'énoncé ?' : 'Modifier le corrigé ?'}
+        description={
+          reuploadTarget === 'enonce'
+            ? 'Les images et la transcription de l\'énoncé seront supprimées. Le barème devra être régénéré.'
+            : 'Les images et la transcription du corrigé seront supprimées. Vous pourrez en uploader de nouvelles.'
+        }
+        confirmLabel={reuploadTarget === 'enonce' ? 'Modifier l\'énoncé' : 'Modifier le corrigé'}
+        onConfirm={() => { if (reuploadTarget) handleReupload(reuploadTarget) }}
+      />
     </div>
   )
 }

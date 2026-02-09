@@ -180,13 +180,14 @@ export async function callOpenAIResponses (
 }
 
 // ─── Anthropic ────────────────────────────────────────────
-// Opus 4.6 utilise adaptive thinking (recommandé par Anthropic, pas budget_tokens)
+// Opus 4.6 : adaptive thinking + structured outputs + 128K output
 const ANTHROPIC_ADAPTIVE_MODELS = new Set(['claude-opus-4-6'])
 
 export async function callAnthropic (
   model: string,
   messages: any[],
-  apiKey: string
+  apiKey: string,
+  options?: LLMOptions
 ) {
   const modelMap: Record<string, string> = {
     'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
@@ -200,7 +201,6 @@ export async function callAnthropic (
   let systemContent: string | any[] | undefined
   const filteredMessages = messages.filter((m) => {
     if (m.role === 'system') {
-      // Supporte system en string ou en tableau de blocs (pour cache_control)
       systemContent = m.content
       return false
     }
@@ -210,13 +210,13 @@ export async function callAnthropic (
   const body: any = {
     model: modelMap[model] || model,
     messages: filteredMessages,
-    max_tokens: isAdaptive ? 32000 : 8192,
+    // Opus 4.6 supporte 128K output ; 64K laisse de la marge pour thinking + réponse
+    max_tokens: isAdaptive ? 64000 : 8192,
   }
 
   if (isAdaptive) {
-    // Adaptive thinking pour Opus 4.6 — Claude décide quand et combien réfléchir
+    // Adaptive thinking — Claude décide quand et combien réfléchir
     // Pas de temperature avec adaptive thinking
-    // max_tokens à 32000 pour laisser assez de place au texte après le thinking
     body.thinking = { type: 'adaptive' }
   } else {
     body.temperature = 0
@@ -226,6 +226,17 @@ export async function callAnthropic (
     body.system = systemContent
   }
 
+  // Structured outputs : garantir un JSON valide via output_config.format
+  if (options?.anthropicSchema) {
+    body.output_config = {
+      format: {
+        type: 'json_schema',
+        schema: options.anthropicSchema,
+      },
+    }
+    console.log(`[Anthropic] 📐 Structured outputs activés (json_schema)`)
+  }
+
   // Détecter si le prompt utilise du caching (blocs avec cache_control)
   const hasCaching = Array.isArray(systemContent)
     || filteredMessages.some((m: any) =>
@@ -233,7 +244,7 @@ export async function callAnthropic (
     )
 
   if (hasCaching) {
-    console.log(`[Anthropic] model=${model}, adaptive=${isAdaptive}, prompt_caching=ON`)
+    console.log(`[Anthropic] model=${model}, adaptive=${isAdaptive}, prompt_caching=ON, max_tokens=${body.max_tokens}`)
   } else {
     console.log(`[Anthropic] model=${model}, adaptive=${isAdaptive}, max_tokens=${body.max_tokens}`)
   }
@@ -259,9 +270,13 @@ export async function callAnthropic (
 
   const data = await res.json()
 
-  // Log cache performance si disponible
-  if (data.usage?.cache_read_input_tokens || data.usage?.cache_creation_input_tokens) {
-    console.log(`[Anthropic] 💾 Cache — read: ${data.usage.cache_read_input_tokens ?? 0} tokens, write: ${data.usage.cache_creation_input_tokens ?? 0} tokens, uncached: ${data.usage.input_tokens ?? 0} tokens`)
+  // Log usage et cache
+  if (data.usage) {
+    const u = data.usage
+    const parts = [`input=${u.input_tokens ?? '?'}`, `output=${u.output_tokens ?? '?'}`]
+    if (u.cache_read_input_tokens) parts.push(`cache_read=${u.cache_read_input_tokens}`)
+    if (u.cache_creation_input_tokens) parts.push(`cache_write=${u.cache_creation_input_tokens}`)
+    console.log(`[Anthropic] 📊 Usage — ${parts.join(', ')}`)
   }
 
   // Log stop reason pour détecter les troncatures
@@ -269,26 +284,35 @@ export async function callAnthropic (
     console.warn(`[Anthropic] ⚠️ stop_reason=${data.stop_reason} (réponse potentiellement tronquée)`)
   }
 
-  // Adaptive/thinking models peuvent renvoyer [{type:"thinking",...}, {type:"text",...}]
-  // ou juste [{type:"text",...}] si Claude décide de ne pas réfléchir
+  // Adaptive/thinking models renvoient [{type:"thinking",...}, {type:"text",...}]
   const textBlock = data.content.find((b: any) => b.type === 'text')
 
   if (textBlock && textBlock.text.length > 10) {
     return textBlock.text
   }
 
-  // Fallback : si le bloc texte est trop court (< 10 chars), le thinking a peut-être
-  // consommé le budget tokens et le JSON est dans le bloc thinking.
-  // Chercher le dernier bloc JSON valide dans le thinking.
+  // Fallback : si le bloc texte est trop court, chercher du JSON dans le thinking.
+  // Regex générique : cherche tout objet JSON avec au moins une clé commune
   if (isAdaptive) {
     const thinkingBlocks = data.content.filter((b: any) => b.type === 'thinking')
     for (const tb of thinkingBlocks.reverse()) {
       const thinking = tb.thinking || ''
-      // Chercher un bloc JSON dans le thinking (commence par { et finit par })
-      const jsonMatch = thinking.match(/\{[\s\S]*"note_globale"[\s\S]*\}/)
+      // Chercher un gros bloc JSON (barème: "questions", correction: "note_globale")
+      const jsonMatch = thinking.match(/\{[\s\S]*?("questions"|"note_globale"|"total")[\s\S]*\}/)
       if (jsonMatch) {
-        console.log(`[Anthropic] 🔄 JSON extrait du bloc thinking (${jsonMatch[0].length} chars)`)
-        return jsonMatch[0]
+        // Valider que c'est du JSON parsable
+        try {
+          JSON.parse(jsonMatch[0])
+          console.log(`[Anthropic] 🔄 JSON extrait du bloc thinking (${jsonMatch[0].length} chars)`)
+          return jsonMatch[0]
+        } catch {
+          // Regex trop greedy, essayer de trouver le dernier } qui parse
+          const candidate = extractValidJson(thinking)
+          if (candidate) {
+            console.log(`[Anthropic] 🔄 JSON extrait du thinking par parsing (${candidate.length} chars)`)
+            return candidate
+          }
+        }
       }
     }
   }
@@ -299,6 +323,41 @@ export async function callAnthropic (
 
   // Fallback : premier bloc
   return data.content[0]?.text || data.content[0]?.thinking || ''
+}
+
+/**
+ * Extrait le plus gros bloc JSON valide d'un texte (thinking block).
+ * Cherche les { et essaie de parser jusqu'au } correspondant.
+ */
+function extractValidJson (text: string): string | null {
+  const starts: number[] = []
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '{') starts.push(i)
+  }
+
+  // Trier par position décroissante pour trouver le dernier gros bloc
+  for (const start of starts) {
+    let depth = 0
+    for (let i = start; i < text.length; i++) {
+      if (text[i] === '{') depth++
+      else if (text[i] === '}') {
+        depth--
+        if (depth === 0) {
+          const candidate = text.slice(start, i + 1)
+          if (candidate.length > 50) {
+            try {
+              JSON.parse(candidate)
+              return candidate
+            } catch {
+              // Continuer
+            }
+          }
+          break
+        }
+      }
+    }
+  }
+  return null
 }
 
 // ─── Google Gemini ────────────────────────────────────────
@@ -695,6 +754,8 @@ function getProvider (modelId: string): string {
 
 export interface LLMOptions {
   jsonMode?: boolean
+  /** Schéma JSON pour Anthropic structured outputs (output_config.format) */
+  anthropicSchema?: Record<string, any>
 }
 
 export async function callLLM (
@@ -717,7 +778,7 @@ export async function callLLM (
       result = await callOpenAIResponses(modelId, messages, env.OPENAI_API_KEY!, options)
       break
     case 'anthropic':
-      result = await callAnthropic(modelId, messages, env.ANTHROPIC_API_KEY!)
+      result = await callAnthropic(modelId, messages, env.ANTHROPIC_API_KEY!, options)
       break
     case 'google':
       result = await callGemini(modelId, messages, env.GOOGLE_API_KEY!, options)

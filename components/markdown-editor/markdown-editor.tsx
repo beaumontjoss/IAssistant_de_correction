@@ -13,7 +13,7 @@ interface MarkdownEditorProps {
 }
 
 export function MarkdownEditor ({ value, onChange, className, readOnly = false }: MarkdownEditorProps) {
-  const [mode, setMode] = useState<'edit' | 'preview'>(readOnly ? 'preview' : 'edit')
+  const [mode, setMode] = useState<'edit' | 'preview'>('preview')
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     onChange(e.target.value)
