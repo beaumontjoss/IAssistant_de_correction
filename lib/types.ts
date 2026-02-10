@@ -54,11 +54,12 @@ export const TRANSCRIPTION_MODELS: TranscriptionModel[] = [
 
 export const CORRECTION_MODELS: CorrectionModel[] = [
   ...TRANSCRIPTION_MODELS,
-  { id: 'deepseek-v3.2', label: 'DeepSeek V3.2 (Thinking)', provider: 'deepseek', isMultimodal: false },
+  { id: 'deepseek-v3.2', label: 'DeepSeek V3.2', provider: 'deepseek', isMultimodal: false },
+  { id: 'mistral-large', label: 'Mistral Large 3', provider: 'mistral', isMultimodal: false },
   { id: 'kimi-k2-thinking', label: 'Kimi K2 Thinking', provider: 'moonshot', isMultimodal: false },
 ]
 
-export const TEXT_ONLY_MODELS = ['deepseek-v3.2', 'kimi-k2-thinking']
+export const TEXT_ONLY_MODELS = ['deepseek-v3.2', 'mistral-large', 'kimi-k2-thinking']
 
 export interface BaremeCritere {
   question: string      // réf. comme "1)a)", "2)" — vide pour les critères thématiques (dissertation)
@@ -122,7 +123,7 @@ export function createEmptyControle (): Controle {
     matiere: 'Francais',
     severite: 'classique',
     modele_bareme: 'claude-opus-4-6',
-    modele_correction: 'claude-sonnet-4-5',
+    modele_correction: 'deepseek-v3.2',
     enonce_images: [],
     corrige_images: [],
     enonce_text: null,

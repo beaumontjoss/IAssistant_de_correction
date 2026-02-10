@@ -209,6 +209,7 @@ export default function ControlePage () {
           note: q.note,
           points_max: q.points_max,
           justification: q.justification,
+          erreurs: q.erreurs ?? [],
         })),
       }))
   }, [copies])
@@ -716,8 +717,8 @@ export default function ControlePage () {
                                         isLoading={correctingIds.has(copy.id)}
                                         className="gap-1.5"
                                       >
-                                        <RotateCcw className="h-3.5 w-3.5" />
-                                        Recorriger
+                                        {!correctingIds.has(copy.id) && <RotateCcw className="h-3.5 w-3.5" />}
+                                        {correctingIds.has(copy.id) ? 'Correction en cours...' : 'Recorriger'}
                                       </Button>
                                     </div>
                                   </div>

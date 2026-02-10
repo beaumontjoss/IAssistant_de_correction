@@ -6,12 +6,8 @@ import { getBaremePrompt, BAREME_JSON_SCHEMA } from '@/lib/prompts'
 import { robustJsonParse, normalizeBareme } from '@/lib/json-utils'
 import { logLLMCall } from '@/lib/llm-logger'
 
-// Modèles Anthropic qui supportent le prefilling du message assistant
-// Opus 4.6 a l'adaptive thinking par défaut → interdit le prefill
-const ANTHROPIC_PREFILL_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-4-5'])
-
 // Modèles qui supportent le JSON mode natif (response_format ou responseMimeType)
-const JSON_MODE_PROVIDERS = new Set(['openai', 'openai-responses', 'google', 'deepseek', 'xai', 'moonshot'])
+const JSON_MODE_PROVIDERS = new Set(['openai', 'openai-responses', 'google', 'deepseek', 'xai', 'moonshot', 'mistral-chat'])
 
 // Prompt pour transcrire des images de document en texte
 // Contexte éducatif explicite pour éviter le filtre RECITATION de Gemini
@@ -45,7 +41,7 @@ export async function POST (req: NextRequest) {
     const body = await req.json()
     const { modelId, matiere, classe, enonceImages, corrigeImages, enonceText: existingEnonceText, corrigeText: existingCorrigeText } = body
 
-    if (!modelId || !matiere || !classe || !enonceImages?.length) {
+    if (!modelId || !matiere || !classe || (!enonceImages?.length && !existingEnonceText)) {
       return NextResponse.json(
         { error: 'Paramètres manquants' },
         { status: 400 }
@@ -89,10 +85,7 @@ export async function POST (req: NextRequest) {
 
     const provider = getProviderFromModel(modelId)
     const jsonMode = JSON_MODE_PROVIDERS.has(provider)
-    const usePrefill = provider === 'anthropic' && ANTHROPIC_PREFILL_MODELS.has(modelId)
-
-    // Anthropic structured outputs : schéma JSON garanti pour Opus 4.6+
-    const useStructuredOutput = provider === 'anthropic' && !ANTHROPIC_PREFILL_MODELS.has(modelId)
+    const useStructuredOutput = provider === 'anthropic'
 
     // ─── Déterminer si on travaille en mode texte ou images ──
     const hasEnonceText = !!existingEnonceText
@@ -125,51 +118,20 @@ export async function POST (req: NextRequest) {
 
     // ─── Génération du barème ──────────────────────────────
     const baremePromise = (async () => {
-      let result: string
-
       if (useTextMode) {
         // Mode texte : prompt seul, pas d'images
         const messages = buildTextMessages('', prompt)
-
-        if (usePrefill) {
-          messages.push({ role: 'assistant', content: '{' })
-        }
-
-        result = await callLLM(modelId, messages, env, llmOptions)
-
-        if (usePrefill && !result.startsWith('{')) {
-          result = '{' + result
-        }
+        return await callLLM(modelId, messages, env, llmOptions)
       } else if (provider === 'google') {
         const parts = buildMessagesWithImages(prompt, allImages, modelId)
-        result = await callLLM(modelId, parts, env, llmOptions)
+        return await callLLM(modelId, parts, env, llmOptions)
       } else if (allImages.length > 0 && provider !== 'deepseek') {
         const messages = buildMessagesWithImages(prompt, allImages, modelId)
-
-        if (usePrefill) {
-          messages.push({ role: 'assistant', content: '{' })
-        }
-
-        result = await callLLM(modelId, messages, env, llmOptions)
-
-        if (usePrefill && !result.startsWith('{')) {
-          result = '{' + result
-        }
+        return await callLLM(modelId, messages, env, llmOptions)
       } else {
         const messages = buildTextMessages('', prompt)
-
-        if (usePrefill) {
-          messages.push({ role: 'assistant', content: '{' })
-        }
-
-        result = await callLLM(modelId, messages, env, llmOptions)
-
-        if (usePrefill && !result.startsWith('{')) {
-          result = '{' + result
-        }
+        return await callLLM(modelId, messages, env, llmOptions)
       }
-
-      return result
     })()
 
     // ─── Transcriptions en parallèle (si pas déjà faites) ──
@@ -222,7 +184,7 @@ export async function POST (req: NextRequest) {
       provider,
       prompt: { full: prompt },
       messages: [{ role: 'user', content: logContent }],
-      options: { jsonMode, prefill: usePrefill },
+      options: { jsonMode },
       response_raw: baremeResult,
       response_parsed: bareme,
       meta: {
@@ -283,6 +245,7 @@ function getProviderFromModel (modelId: string): string {
     'kimi-k2.5': 'moonshot',
     'kimi-k2-thinking': 'moonshot',
     'grok-4': 'xai',
+    'mistral-large': 'mistral-chat',
   }
   return map[modelId] || 'openai'
 }

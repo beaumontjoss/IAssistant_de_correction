@@ -620,6 +620,49 @@ export async function callMistralOCR (
   return data.pages.map((p: any) => p.markdown).join('\n\n')
 }
 
+// ─── Mistral Chat (Large, etc.) ───────────────────────────
+export async function callMistralChat (
+  model: string,
+  messages: any[],
+  apiKey: string,
+  options?: LLMOptions
+): Promise<string> {
+  const modelMap: Record<string, string> = {
+    'mistral-large': 'mistral-large-2512',
+  }
+
+  const body: any = {
+    model: modelMap[model] || model,
+    messages,
+    temperature: 0,
+  }
+
+  if (options?.jsonMode) {
+    body.response_format = { type: 'json_object' }
+  }
+
+  const res = await fetchWithRetry(
+    'https://api.mistral.ai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    },
+    'Mistral'
+  )
+
+  if (!res.ok) {
+    const error = await res.text()
+    throw new Error(`Mistral API error: ${res.status} — ${error}`)
+  }
+
+  const data = await res.json()
+  return data.choices[0].message.content
+}
+
 // ─── Generic dispatcher ──────────────────────────────────
 export interface ImageContent {
   base64: string
@@ -747,7 +790,8 @@ function getProvider (modelId: string): string {
     'kimi-k2.5': 'moonshot',
     'kimi-k2-thinking': 'moonshot',
     'grok-4': 'xai',
-    'mistral-ocr': 'mistral',
+    'mistral-ocr': 'mistral-ocr',
+    'mistral-large': 'mistral-chat',
   }
   return providerMap[modelId] || 'openai'
 }
@@ -791,6 +835,9 @@ export async function callLLM (
       break
     case 'xai':
       result = await callXAI(modelId, messages, env.XAI_API_KEY!, options)
+      break
+    case 'mistral-chat':
+      result = await callMistralChat(modelId, messages, env.MISTRAL_API_KEY!, options)
       break
     default:
       throw new Error(`Provider inconnu: ${provider}`)

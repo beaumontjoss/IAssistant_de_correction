@@ -6,12 +6,13 @@ import { getCorrectionPromptParts, CORRECTION_JSON_SCHEMA } from '@/lib/prompts'
 import { robustJsonParse, normalizeCorrection } from '@/lib/json-utils'
 import { logLLMCall } from '@/lib/llm-logger'
 
-// Modèles Anthropic qui supportent le prefilling du message assistant
-// Opus 4.6 a l'adaptive thinking par défaut → interdit le prefill
-const ANTHROPIC_PREFILL_MODELS = new Set(['claude-haiku-4-5', 'claude-sonnet-4-5'])
-
 // Modèles qui supportent le JSON mode natif (response_format ou responseMimeType)
-const JSON_MODE_PROVIDERS = new Set(['openai', 'openai-responses', 'google', 'deepseek', 'xai', 'moonshot'])
+const JSON_MODE_PROVIDERS = new Set(['openai', 'openai-responses', 'google', 'deepseek', 'xai', 'moonshot', 'mistral-chat'])
+
+// Fallbacks par modèle : si le modèle principal échoue, on essaie les suivants
+const FALLBACK_MODELS: Record<string, string[]> = {
+  'deepseek-v3.2': ['mistral-large', 'gemini-3-pro'],
+}
 
 export async function POST (req: NextRequest) {
   const t0 = performance.now()
@@ -60,61 +61,75 @@ export async function POST (req: NextRequest) {
 
     log(`Prompt construit — statique: ${staticContext.length} chars (cacheable), variable: ${variableContext.length} chars`)
 
-    // ─── Construire les messages avec prompt caching ───
-    const messages = buildCorrectionMessages(staticContext, variableContext, modelId)
+    // ─── Pipeline de correction avec fallback ───
+    const modelsToTry = [modelId, ...(FALLBACK_MODELS[modelId] || [])]
+    const errors: string[] = []
 
-    const provider = getProviderFromModel(modelId)
-    const jsonMode = JSON_MODE_PROVIDERS.has(provider)
-    const usePrefill = provider === 'anthropic' && ANTHROPIC_PREFILL_MODELS.has(modelId)
-    const useStructuredOutput = provider === 'anthropic' && !ANTHROPIC_PREFILL_MODELS.has(modelId)
+    for (const currentModel of modelsToTry) {
+      try {
+        const messages = buildCorrectionMessages(staticContext, variableContext, currentModel)
+        const provider = getProviderFromModel(currentModel)
+        const jsonMode = JSON_MODE_PROVIDERS.has(provider)
+        const useStructuredOutput = provider === 'anthropic'
 
-    if (usePrefill) {
-      messages.push({ role: 'assistant', content: '{' })
+        const llmOptions: Record<string, any> = { jsonMode }
+        if (useStructuredOutput) {
+          llmOptions.anthropicSchema = CORRECTION_JSON_SCHEMA
+          log('Structured outputs activés (Anthropic json_schema)')
+        }
+
+        log(`Appel LLM ${currentModel}...`)
+        const result = await callLLM(currentModel, messages, env, llmOptions)
+        const elapsedMs = performance.now() - t0
+
+        log('Réponse LLM reçue, parsing JSON...')
+
+        const parsed = robustJsonParse(result)
+        const correction = normalizeCorrection(parsed, baremeJson)
+
+        // Log asynchrone (non bloquant)
+        logLLMCall({
+          type: 'correction',
+          model: currentModel,
+          provider,
+          prompt: { static: staticContext, variable: variableContext },
+          messages,
+          options: { jsonMode },
+          response_raw: result,
+          response_parsed: correction,
+          meta: {
+            elapsed_ms: Math.round(elapsedMs),
+            timestamp: new Date().toISOString(),
+            failed_models: errors.length > 0 ? errors : undefined,
+          },
+        })
+
+        if (!correction || correction.questions.length === 0) {
+          const msg = `${currentModel}: correction non exploitable`
+          log(`⚠️ ${msg}`)
+          errors.push(msg)
+          continue
+        }
+
+        if (currentModel !== modelId) {
+          log(`✅ Terminé via fallback ${currentModel} — note=${correction.note_globale}/${correction.total}, ${correction.questions.length} questions`)
+        } else {
+          log(`✅ Terminé — note=${correction.note_globale}/${correction.total}, ${correction.questions.length} questions`)
+        }
+        return NextResponse.json({ correction, model: currentModel })
+      } catch (err) {
+        const msg = `${currentModel}: ${err instanceof Error ? err.message : 'Erreur inconnue'}`
+        log(`⚠️ Échec ${msg}`)
+        errors.push(msg)
+      }
     }
 
-    const llmOptions: Record<string, any> = { jsonMode }
-    if (useStructuredOutput) {
-      llmOptions.anthropicSchema = CORRECTION_JSON_SCHEMA
-      log('Structured outputs activés (Anthropic json_schema)')
-    }
-
-    log('Appel LLM...')
-    let result = await callLLM(modelId, messages, env, llmOptions)
-    const elapsedMs = performance.now() - t0
-
-    if (usePrefill && !result.startsWith('{')) {
-      result = '{' + result
-    }
-
-    log('Réponse LLM reçue, parsing JSON...')
-
-    // Parsing robuste + normalisation alignée sur le barème
-    const parsed = robustJsonParse(result)
-    const correction = normalizeCorrection(parsed, baremeJson)
-
-    // Log asynchrone (non bloquant)
-    logLLMCall({
-      type: 'correction',
-      model: modelId,
-      provider,
-      prompt: { static: staticContext, variable: variableContext },
-      messages,
-      options: { jsonMode, prefill: usePrefill },
-      response_raw: result,
-      response_parsed: correction,
-      meta: { elapsed_ms: Math.round(elapsedMs), timestamp: new Date().toISOString() },
-    })
-
-    if (!correction || correction.questions.length === 0) {
-      log('⚠️ Correction non exploitable')
-      return NextResponse.json(
-        { error: 'Le modèle n\'a pas renvoyé une correction exploitable. Réessayez.' },
-        { status: 500 }
-      )
-    }
-
-    log(`✅ Terminé — note=${correction.note_globale}/${correction.total}, ${correction.questions.length} questions`)
-    return NextResponse.json({ correction })
+    // Tous les modèles ont échoué
+    log('❌ Tous les modèles ont échoué')
+    return NextResponse.json(
+      { error: `Correction impossible :\n${errors.join('\n')}` },
+      { status: 500 }
+    )
   } catch (err: unknown) {
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
     console.error(`[CORRECTION] ❌ ${elapsed}s — Erreur:`, err)
@@ -138,6 +153,7 @@ function getProviderFromModel (modelId: string): string {
     'kimi-k2.5': 'moonshot',
     'kimi-k2-thinking': 'moonshot',
     'grok-4': 'xai',
+    'mistral-large': 'mistral-chat',
   }
   return map[modelId] || 'openai'
 }
