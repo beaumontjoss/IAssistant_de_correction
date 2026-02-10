@@ -83,36 +83,102 @@ export function normalizeBareme (parsed: any): { total: number; questions: any[]
   // Extraire les sections depuis différentes clés possibles
   let sections: any[] = []
 
-  if (Array.isArray(parsed.questions)) {
-    sections = parsed.questions
-  } else if (Array.isArray(parsed.sections)) {
-    sections = parsed.sections
-  } else if (Array.isArray(parsed.exercices)) {
-    sections = parsed.exercices
-  } else if (Array.isArray(parsed.items)) {
-    sections = parsed.items
-  } else if (Array.isArray(parsed.bareme)) {
-    sections = parsed.bareme
-  } else if (Array.isArray(parsed)) {
-    sections = parsed
+  // Chercher dans les clés connues (tableau ou objet)
+  const candidates = [
+    parsed.questions, parsed.sections, parsed.exercices,
+    parsed.items, parsed.bareme, parsed['barème'],
+  ]
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      sections = candidate
+      break
+    }
+    // Format objet : détecter si c'est un wrapper ou un vrai objet-sections
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      // Cas 1 : wrapper { total_points, sections: [...] } ou { total, questions: [...] } (ex: GPT-4o Mini)
+      const innerArrayKeys = ['questions', 'sections', 'exercices', 'items']
+      const innerArray = innerArrayKeys
+        .map((k) => candidate[k])
+        .find((v) => Array.isArray(v) && v.length > 0)
+
+      if (innerArray) {
+        sections = innerArray
+        break
+      }
+
+      // Cas 2 : catégories { "Grammaire": { total, questions: [...] }, "Compréhension": { ... } } (ex: Mistral)
+      const values = Object.values(candidate)
+      const hasNestedQuestions = values.every((v: any) =>
+        v && typeof v === 'object' && !Array.isArray(v) &&
+        innerArrayKeys.some((k) => Array.isArray(v[k]))
+      )
+      if (hasNestedQuestions) {
+        // Aplatir : extraire toutes les questions de chaque catégorie
+        for (const val of values) {
+          const arr = innerArrayKeys.map((k) => (val as any)[k]).find((v) => Array.isArray(v)) || []
+          sections.push(...arr)
+        }
+        break
+      }
+
+      // Cas 3 : vrai objet { "titre question": { critères, points } } (ex: Mistral simple)
+      sections = Object.entries(candidate).map(([titre, value]: [string, any]) => ({
+        titre,
+        ...(typeof value === 'object' ? value : {}),
+      }))
+      break
+    }
   }
 
+  if (sections.length === 0 && Array.isArray(parsed)) {
+    // Cas spécial : tableau à 1 élément qui est un objet multi-clés (ex: Gemini Flash)
+    // [{ "Q1 titre": {Points, Critères}, "Q2 titre": {...} }]
+    if (parsed.length === 1 && typeof parsed[0] === 'object' && !Array.isArray(parsed[0])) {
+      const keys = Object.keys(parsed[0])
+      if (keys.length > 1 && typeof parsed[0][keys[0]] === 'object') {
+        sections = keys.map((titre) => ({ titre, ...parsed[0][titre] }))
+      } else {
+        sections = parsed
+      }
+    } else {
+      sections = parsed
+    }
+  }
+
+  // Déplier les questions au format { "titre": { points, critères } } (ex: Mistral deeply nested)
+  // Chaque élément du tableau est un objet à 1 clé dont la valeur est un objet avec points/critères
+  const flatSections = sections.flatMap((q: any) => {
+    // Si l'élément a exactement 1 clé et sa valeur est un objet avec points ou critères → déplier
+    const keys = Object.keys(q)
+    if (keys.length === 1 && typeof q[keys[0]] === 'object' && !Array.isArray(q[keys[0]])) {
+      const inner = q[keys[0]]
+      if (inner.points !== undefined || inner['critères'] || inner.criteres || inner.criteria) {
+        return [{ titre: keys[0], ...inner }]
+      }
+    }
+    return [q]
+  })
+
   // Normaliser chaque section
-  const normalized = sections.map((q: any, i: number) => {
+  const normalized = flatSections.map((q: any, i: number) => {
     const criteres = normalizeCriteres(q)
-    const points = criteres.reduce((sum: number, c: any) => sum + (c.points || 0), 0)
+    const criteresSum = criteres.reduce((sum: number, c: any) => sum + (c.points || 0), 0)
+    // Utiliser la somme des critères, ou le champ points de la section en fallback
+    const points = criteresSum > 0 ? criteresSum : Number(q.points || q.Points || q.total || q.note_max || q.max || 0)
 
     return {
       id: String(q.id || q.numero || i + 1),
-      titre: q.titre || q.title || q.nom || q.name || q.intitule || `Section ${i + 1}`,
+      titre: q.titre || q.title || q.section || q.nom || q.name || q.intitule || `Section ${i + 1}`,
       points,
       criteres,
     }
   })
 
   // Calculer le total
-  const total = parsed.total
-    ? Number(parsed.total)
+  const rawTotal = parsed.total ?? parsed.total_points ?? parsed.totalPoints ?? parsed.note_totale ?? parsed['total_général'] ?? parsed['total_general']
+  const total = rawTotal
+    ? Number(rawTotal)
     : normalized.reduce((sum: number, q: any) => sum + q.points, 0)
 
   return { total, questions: normalized }
@@ -124,12 +190,51 @@ export function normalizeBareme (parsed: any): { total: number; questions: any[]
  * Gère l'ancien format (string[]) et le nouveau (BaremeCritere[]).
  */
 function normalizeCriteres (q: any): Array<{ question: string; description: string; points: number }> {
-  const raw = q.criteres || q.criteria || q.details || []
+  const raw = q.criteres || q['critères'] || q.criteria || q.details || q.Criteres || q['Critères'] || q.Criteria
 
-  if (!Array.isArray(raw) || raw.length === 0) {
+  // Format objet { "description": points } (ex: Mistral) ou { "0": "desc string", "1": "desc string" } (ex: GPT)
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const entries = Object.entries(raw)
+    // Détecter si les valeurs sont des nombres (Mistral) ou des strings (GPT)
+    const hasNumValues = entries.some(([, v]) => typeof v === 'number' && v > 0)
+
+    if (hasNumValues) {
+      // Format { "description critère": points_number }
+      const result = entries
+        .filter(([, v]) => typeof v === 'number' && v > 0)
+        .map(([desc, pts]: [string, any]) => ({
+          question: '',
+          description: desc,
+          points: Number(pts),
+        }))
+      if (result.length > 0) return result
+    }
+
+    // Format { "0": "Réponse correcte : 2 pts", "1": "..." } ou { key: "string desc" }
+    const stringEntries = entries.filter(([, v]) => typeof v === 'string')
+    if (stringEntries.length > 0) {
+      return stringEntries.map(([, desc]: [string, any]) => {
+        const ptsMatch = String(desc).match(/(\d+(?:[.,]\d+)?)\s*(?:pts?|points?)/i)
+        const pts = ptsMatch ? Number(ptsMatch[1].replace(',', '.')) : 0
+        return { question: '', description: String(desc), points: pts }
+      })
+    }
+
+    // Catch-all : objet avec valeurs numériques (y compris 0) — ex: { "desc": 0, "desc2": 0 }
+    // Retourner toutes les entrées comme critères
+    if (entries.length > 0) {
+      return entries.map(([desc, val]: [string, any]) => ({
+        question: '',
+        description: desc,
+        points: typeof val === 'number' ? val : 0,
+      }))
+    }
+  }
+
+  if (!raw || (!Array.isArray(raw) && typeof raw !== 'object') || (Array.isArray(raw) && raw.length === 0)) {
     // Pas de critères structurés — créer un critère unique depuis la question elle-même
-    const desc = q.description || q.question || q.titre || q.title || 'Critère à préciser'
-    const pts = Number(q.points || q.note_max || q.max || 0)
+    const desc = q.description || q.question || q.titre || q.title || q.section || 'Critère à préciser'
+    const pts = Number(q.points || q.Points || q.total || q.note_max || q.max || 0)
     return [{ question: '', description: typeof desc === 'string' ? desc : String(desc), points: pts }]
   }
 
@@ -165,8 +270,12 @@ export function normalizeCorrection (parsed: any, baremeJson?: string): any | nu
     questions = parsed.questions
   } else if (Array.isArray(parsed.resultats)) {
     questions = parsed.resultats
+  } else if (Array.isArray(parsed['résultats'])) {
+    questions = parsed['résultats']
   } else if (Array.isArray(parsed.notes)) {
     questions = parsed.notes
+  } else if (Array.isArray(parsed.corrections)) {
+    questions = parsed.corrections
   }
 
   const normalized = questions.map((q: any, i: number) => ({
@@ -240,7 +349,7 @@ export function normalizeCorrection (parsed: any, baremeJson?: string): any | nu
   const noteGlobale = aligned.reduce((s: number, q: any) => s + q.note, 0)
   const total = expectedTotal > 0
     ? expectedTotal
-    : (parsed.total ?? parsed.sur ?? parsed.note_max ?? aligned.reduce((s: number, q: any) => s + q.points_max, 0))
+    : (parsed.total ?? parsed.total_points ?? parsed.sur ?? parsed.note_max ?? aligned.reduce((s: number, q: any) => s + q.points_max, 0))
 
   return {
     note_globale: Number(noteGlobale),

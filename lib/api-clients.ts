@@ -284,35 +284,44 @@ export async function callAnthropic (
     console.warn(`[Anthropic] ⚠️ stop_reason=${data.stop_reason} (réponse potentiellement tronquée)`)
   }
 
-  // Adaptive/thinking models renvoient [{type:"thinking",...}, {type:"text",...}]
-  const textBlock = data.content.find((b: any) => b.type === 'text')
+  // Adaptive/thinking models peuvent renvoyer plusieurs blocs text :
+  //   [{type:"text",text:"\n\n"}, {type:"thinking",...}, {type:"text",text:"<JSON>"}]
+  // On prend le bloc text le plus long (le vrai contenu, pas le pré-texte vide).
+  const textBlocks = data.content.filter((b: any) => b.type === 'text')
+  const textBlock = textBlocks.length > 1
+    ? textBlocks.reduce((best: any, b: any) => (b.text?.length ?? 0) > (best.text?.length ?? 0) ? b : best)
+    : textBlocks[0]
 
   if (textBlock && textBlock.text.length > 10) {
     return textBlock.text
   }
 
   // Fallback : si le bloc texte est trop court, chercher du JSON dans le thinking.
-  // Regex générique : cherche tout objet JSON avec au moins une clé commune
   if (isAdaptive) {
     const thinkingBlocks = data.content.filter((b: any) => b.type === 'thinking')
     for (const tb of thinkingBlocks.reverse()) {
       const thinking = tb.thinking || ''
-      // Chercher un gros bloc JSON (barème: "questions", correction: "note_globale")
-      const jsonMatch = thinking.match(/\{[\s\S]*?("questions"|"note_globale"|"total")[\s\S]*\}/)
+      if (thinking.length < 20) continue
+
+      // 1) Regex large : cherche un objet JSON contenant une clé connue (FR ou EN)
+      const jsonMatch = thinking.match(
+        /\{[\s\S]*?("questions"|"sections"|"exercices"|"items"|"bareme"|"barème"|"note_globale"|"total"|"total_points"|"total_général"|"criteres"|"critères"|"resultats"|"résultats"|"corrections")[\s\S]*\}/
+      )
       if (jsonMatch) {
-        // Valider que c'est du JSON parsable
         try {
           JSON.parse(jsonMatch[0])
-          console.log(`[Anthropic] 🔄 JSON extrait du bloc thinking (${jsonMatch[0].length} chars)`)
+          console.log(`[Anthropic] 🔄 JSON extrait du bloc thinking via regex (${jsonMatch[0].length} chars)`)
           return jsonMatch[0]
         } catch {
-          // Regex trop greedy, essayer de trouver le dernier } qui parse
-          const candidate = extractValidJson(thinking)
-          if (candidate) {
-            console.log(`[Anthropic] 🔄 JSON extrait du thinking par parsing (${candidate.length} chars)`)
-            return candidate
-          }
+          // Regex trop greedy — continuer au parsing structurel
         }
+      }
+
+      // 2) Fallback inconditionnel : parsing structurel (cherche les {} équilibrés)
+      const candidate = extractValidJson(thinking)
+      if (candidate) {
+        console.log(`[Anthropic] 🔄 JSON extrait du thinking par parsing structurel (${candidate.length} chars)`)
+        return candidate
       }
     }
   }

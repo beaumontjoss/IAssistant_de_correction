@@ -67,20 +67,22 @@ RÈGLE FONDAMENTALE DE GRANULARITÉ :
 - Crée UNE section par question ou sous-question du contrôle (ex : "1a)", "1b)", "1c)", "2)", "3)", etc.)
 - NE REGROUPE JAMAIS plusieurs questions dans une même section (pas de "Grammaire", "Compréhension", etc.)
 - Chaque section = une question que le professeur corrigera individuellement sur la copie
-- Le titre de chaque section doit décrire précisément ce que la question demande et comporter le numéro de la question ou de la sous-question (ex : "1)a) Identifier le groupe COD de « savourait »", "Réécrire au pluriel", etc.)
+- Le titre de chaque section doit décrire brièvement ce que la question demande et comporter le numéro de la question ou de la sous-question (ex : "1)a) Identifier le groupe COD de « savourait »", "Réécrire au pluriel", etc.)
 - Exception : pour une dissertation, rédaction ou dictée (pas de questions numérotées), utilise des critères thématiques
 
 ADAPTATION AU TYPE D'ÉPREUVE :
 - Contrôle avec questions/exercices : UNE section par question/sous-question. Si la question 1 a trois sous-parties a), b), c) → 3 sections séparées
-- Dissertation : critères thématiques (argumentation, structure, langue, exemples)
-- Rédaction/expression écrite : critères thématiques (consigne, cohérence, vocabulaire, orthographe)
-- Dictée : critères par type de faute (orthographe lexicale, grammaticale, conjugaison, accents)
+- Dissertation : critères thématiques (exemple : argumentation, structure, langue, exemples)
+- Rédaction/expression écrite : critères thématiques (exemple : consigne, cohérence, vocabulaire, orthographe)
+- Dictée : critères par type de faute (exemple : orthographe lexicale, grammaticale, conjugaison, accents)
+- Si tu disposes d'un corrigé type, utilise-le pour déterminer les critères et les points. Sinon, crée des critères qui permettent une correction la plus juste possible de la copie de l'élève.
 
 Pour chaque section :
 - Le titre commence par le numéro de la question ou de la sous-questions
-- Le titre décrit précisément la question posée
-- Les critères détaillent ce qui rapporte ou fait perdre des points
-- Les points sont proportionnels à la difficulté
+- Le titre décrit brièvement la question posée
+- Les critères détaillent ce qui rapporte des points. Il faut qu'ils soient compréhensibles par une IA pour permettre une correction la plus juste possible de la copie de l'élève.
+- Les points sont proportionnels à la difficulté de la question.
+- La somme des points de chaque section doit être égale au total de points du barème.
 
 Le total de points dépend de l'épreuve (pas forcément sur 20). Adapte-le au niveau et au type de contrôle.
 

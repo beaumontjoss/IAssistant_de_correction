@@ -50,16 +50,16 @@ export const TRANSCRIPTION_MODELS: TranscriptionModel[] = [
   { id: 'grok-4', label: 'Grok 4', provider: 'xai', isMultimodal: true },
   { id: 'kimi-k2.5', label: 'Kimi K2.5', provider: 'moonshot', isMultimodal: true },
   { id: 'mistral-ocr', label: 'Mistral OCR', provider: 'mistral', isMultimodal: true },
+  { id: 'mistral-large', label: 'Mistral Large 3', provider: 'mistral', isMultimodal: true },
 ]
 
 export const CORRECTION_MODELS: CorrectionModel[] = [
   ...TRANSCRIPTION_MODELS,
   { id: 'deepseek-v3.2', label: 'DeepSeek V3.2', provider: 'deepseek', isMultimodal: false },
-  { id: 'mistral-large', label: 'Mistral Large 3', provider: 'mistral', isMultimodal: false },
   { id: 'kimi-k2-thinking', label: 'Kimi K2 Thinking', provider: 'moonshot', isMultimodal: false },
 ]
 
-export const TEXT_ONLY_MODELS = ['deepseek-v3.2', 'mistral-large', 'kimi-k2-thinking']
+export const TEXT_ONLY_MODELS = ['deepseek-v3.2', 'kimi-k2-thinking']
 
 export interface BaremeCritere {
   question: string      // réf. comme "1)a)", "2)" — vide pour les critères thématiques (dissertation)
@@ -98,8 +98,13 @@ export interface Correction {
 
 // ─── Contrôle (remplace l'ancien ControlData) ──────────────
 
+export type ControleMode = 'simple' | 'avance'
+export type BaremeInputMode = 'images' | 'texte'
+
 export interface Controle {
   id: string
+  mode: ControleMode
+  bareme_input: BaremeInputMode
   nom: string
   classe: string
   matiere: string
@@ -118,6 +123,8 @@ export interface Controle {
 export function createEmptyControle (): Controle {
   return {
     id: crypto.randomUUID(),
+    mode: 'simple',
+    bareme_input: 'images',
     nom: '',
     classe: '',
     matiere: 'Francais',

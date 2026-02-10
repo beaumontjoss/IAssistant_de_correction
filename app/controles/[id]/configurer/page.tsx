@@ -19,6 +19,8 @@ import {
   MATIERES,
   CORRECTION_MODELS,
   type Controle,
+  type ControleMode,
+  type BaremeInputMode,
   type Severite,
   type BaremeQuestion,
   type BaremeCritere,
@@ -159,18 +161,23 @@ export default function ConfigurerPage () {
 
       setLoadingStep(2)
 
+      // Mode simple : toujours envoyer images + forcer Opus 4.6
+      // Mode avancé : respecter le choix bareme_input (images ou texte)
+      const isSimple = controle.mode === 'simple'
+      const modelId = isSimple ? 'claude-opus-4-6' : controle.modele_bareme
+      const sendText = !isSimple && controle.bareme_input === 'texte'
+
       const res = await fetch('/api/generate-bareme', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          modelId: controle.modele_bareme,
+          modelId,
           matiere: controle.matiere,
           classe: controle.classe,
-          // N'envoyer les images que si le texte transcrit n'existe pas
-          enonceImages: controle.enonce_text ? [] : controle.enonce_images,
-          corrigeImages: controle.corrige_text ? [] : controle.corrige_images,
-          enonceText: controle.enonce_text ?? undefined,
-          corrigeText: controle.corrige_text ?? undefined,
+          enonceImages: sendText ? [] : controle.enonce_images,
+          corrigeImages: sendText ? [] : controle.corrige_images,
+          enonceText: sendText ? (controle.enonce_text ?? undefined) : undefined,
+          corrigeText: sendText ? (controle.corrige_text ?? undefined) : undefined,
         }),
       })
 
@@ -306,8 +313,8 @@ export default function ConfigurerPage () {
             {/* Énoncé */}
             <div className="space-y-2">
               <p className="text-sm font-medium text-texte-primaire">Énoncé du contrôle</p>
-              {!controle.enonce_text ? (
-                /* Pas encore transcrit → upload (ajout de pages possible) + bouton Transcrire */
+              {controle.mode === 'simple' || !controle.enonce_text ? (
+                /* Mode simple OU pas encore transcrit → upload */
                 <div className="space-y-3">
                   <FileUpload
                     label=""
@@ -316,7 +323,7 @@ export default function ConfigurerPage () {
                     onFilesChange={(files) => update({ enonce_images: files })}
                     processFiles={(files) => processFiles(files)}
                   />
-                  {controle.enonce_images.length > 0 && (
+                  {controle.mode === 'avance' && controle.enonce_images.length > 0 && (
                     <Button
                       onClick={() => transcribeDoc('enonce')}
                       isLoading={transcribingEnonce}
@@ -328,7 +335,7 @@ export default function ConfigurerPage () {
                   )}
                 </div>
               ) : (
-                /* État 3 : transcription faite → side-by-side */
+                /* Mode avancé + transcription faite → side-by-side */
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div>
@@ -361,8 +368,8 @@ export default function ConfigurerPage () {
             {/* Corrigé */}
             <div className="space-y-2">
               <p className="text-sm font-medium text-texte-primaire">Corrigé (optionnel)</p>
-              {!controle.corrige_text ? (
-                /* Pas encore transcrit → upload (ajout de pages possible) + bouton Transcrire */
+              {controle.mode === 'simple' || !controle.corrige_text ? (
+                /* Mode simple OU pas encore transcrit → upload */
                 <div className="space-y-3">
                   <FileUpload
                     label=""
@@ -371,7 +378,7 @@ export default function ConfigurerPage () {
                     onFilesChange={(files) => update({ corrige_images: files })}
                     processFiles={(files) => processFiles(files)}
                   />
-                  {controle.corrige_images.length > 0 && (
+                  {controle.mode === 'avance' && controle.corrige_images.length > 0 && (
                     <Button
                       onClick={() => transcribeDoc('corrige')}
                       isLoading={transcribingCorrige}
@@ -383,7 +390,7 @@ export default function ConfigurerPage () {
                   )}
                 </div>
               ) : (
-                /* État 3 : transcription faite → side-by-side */
+                /* Mode avancé + transcription faite → side-by-side */
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div>
@@ -418,13 +425,30 @@ export default function ConfigurerPage () {
         {/* Section 2 : Paramètres */}
         <Card>
           <CardContent className="space-y-6">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="h-10 w-10 rounded-lg bg-bleu-france-light flex items-center justify-center">
-                <Settings className="h-5 w-5 text-bleu-france" />
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-bleu-france-light flex items-center justify-center">
+                  <Settings className="h-5 w-5 text-bleu-france" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-texte-primaire">Paramètres</h3>
+                  <p className="text-sm text-texte-secondaire">Configurez le contexte du contrôle</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-bold text-texte-primaire">Paramètres</h3>
-                <p className="text-sm text-texte-secondaire">Configurez le contexte et le modèle IA</p>
+              {/* Toggle simple / avancé */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => update({ mode: controle.mode === 'simple' ? 'avance' : 'simple' })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+                    controle.mode === 'avance' ? 'bg-bleu-france' : 'bg-bordure'
+                  }`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    controle.mode === 'avance' ? 'translate-x-6' : 'translate-x-1'
+                  }`} />
+                </button>
+                <span className="text-xs text-texte-secondaire">Avancé</span>
               </div>
             </div>
 
@@ -450,21 +474,60 @@ export default function ConfigurerPage () {
               />
             </div>
 
-            <SeverityToggle
-              value={controle.severite}
-              onChange={(severite: Severite) => update({ severite })}
-            />
+            {controle.mode === 'avance' && (
+              <>
+                <SeverityToggle
+                  value={controle.severite}
+                  onChange={(severite: Severite) => update({ severite })}
+                />
 
-            <Select
-              label="Modèle pour le barème"
-              hint="IA utilisée pour générer le barème à partir de l'énoncé"
-              value={controle.modele_bareme}
-              onChange={(e) => update({ modele_bareme: e.target.value })}
-              options={CORRECTION_MODELS.map((m) => ({
-                value: m.id,
-                label: m.label,
-              }))}
-            />
+                <Select
+                  label="Modèle pour le barème"
+                  hint="IA utilisée pour générer le barème à partir de l'énoncé"
+                  value={controle.modele_bareme}
+                  onChange={(e) => update({ modele_bareme: e.target.value })}
+                  options={CORRECTION_MODELS.map((m) => ({
+                    value: m.id,
+                    label: m.label,
+                  }))}
+                />
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-texte-primaire">Envoi au LLM</p>
+                  <p className="text-xs text-texte-secondaire">Choisissez ce qui est transmis à l&apos;IA pour la génération du barème</p>
+                  <div className="flex rounded-lg border border-bordure overflow-hidden">
+                    {([
+                      { value: 'images' as BaremeInputMode, label: 'Images', icon: '🖼️' },
+                      { value: 'texte' as BaremeInputMode, label: 'Texte transcrit', icon: '📝' },
+                    ]).map((opt) => {
+                      const isActive = controle.bareme_input === opt.value
+                      const isDisabled = opt.value === 'texte' && !controle.enonce_text
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => { if (!isDisabled) update({ bareme_input: opt.value }) }}
+                          disabled={isDisabled}
+                          className={`flex-1 px-4 py-2.5 text-sm font-medium transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-bleu-france text-white'
+                              : isDisabled
+                                ? 'bg-fond-alt text-texte-disabled cursor-not-allowed'
+                                : 'bg-fond-card text-texte-secondaire hover:bg-fond-alt'
+                          }`}
+                        >
+                          <span className="mr-1.5">{opt.icon}</span>
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {controle.bareme_input === 'texte' && !controle.enonce_text && (
+                    <p className="text-xs text-amber-600">Transcrivez d&apos;abord l&apos;énoncé pour utiliser le mode texte</p>
+                  )}
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -487,7 +550,7 @@ export default function ConfigurerPage () {
                   onClick={generateBareme}
                   size="lg"
                   className="gap-2"
-                  disabled={controle.enonce_images.length === 0 || transcribingEnonce || transcribingCorrige}
+                  disabled={controle.enonce_images.length === 0 || (controle.mode === 'avance' && (transcribingEnonce || transcribingCorrige))}
                 >
                   <Sparkles className="h-4 w-4" />
                   Générer le barème

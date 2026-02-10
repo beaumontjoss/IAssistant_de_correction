@@ -70,7 +70,7 @@ export async function POST (req: NextRequest) {
         const messages = buildCorrectionMessages(staticContext, variableContext, currentModel)
         const provider = getProviderFromModel(currentModel)
         const jsonMode = JSON_MODE_PROVIDERS.has(provider)
-        const useStructuredOutput = provider === 'anthropic'
+        const useStructuredOutput = provider === 'anthropic' && currentModel !== 'claude-opus-4-6'
 
         const llmOptions: Record<string, any> = { jsonMode }
         if (useStructuredOutput) {

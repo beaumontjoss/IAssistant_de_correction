@@ -85,7 +85,7 @@ export async function POST (req: NextRequest) {
 
     const provider = getProviderFromModel(modelId)
     const jsonMode = JSON_MODE_PROVIDERS.has(provider)
-    const useStructuredOutput = provider === 'anthropic'
+    const useStructuredOutput = provider === 'anthropic' && modelId !== 'claude-opus-4-6'
 
     // ─── Déterminer si on travaille en mode texte ou images ──
     const hasEnonceText = !!existingEnonceText
