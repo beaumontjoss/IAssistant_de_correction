@@ -54,7 +54,8 @@ export default function ConfigurerPage () {
   const [isGenerating, setIsGenerating] = useState(false)
   const [loadingStep, setLoadingStep] = useState(0)
   const [reuploadTarget, setReuploadTarget] = useState<'enonce' | 'corrige' | null>(null)
-  const [transcribingDoc, setTranscribingDoc] = useState<'enonce' | 'corrige' | null>(null)
+  const [transcribingEnonce, setTranscribingEnonce] = useState(false)
+  const [transcribingCorrige, setTranscribingCorrige] = useState(false)
 
   // Load contrôle
   useEffect(() => {
@@ -91,7 +92,8 @@ export default function ConfigurerPage () {
     const images = target === 'enonce' ? controle.enonce_images : controle.corrige_images
     if (images.length === 0) return
 
-    setTranscribingDoc(target)
+    const setLoading = target === 'enonce' ? setTranscribingEnonce : setTranscribingCorrige
+    setLoading(true)
     try {
       const res = await fetch('/api/transcribe-doc', {
         method: 'POST',
@@ -109,7 +111,7 @@ export default function ConfigurerPage () {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue'
       toast.error('Échec de la transcription', { description: msg })
     } finally {
-      setTranscribingDoc(null)
+      setLoading(false)
     }
   }, [controle, update])
 
@@ -164,8 +166,9 @@ export default function ConfigurerPage () {
           modelId: controle.modele_bareme,
           matiere: controle.matiere,
           classe: controle.classe,
-          enonceImages: controle.enonce_images,
-          corrigeImages: controle.corrige_images,
+          // N'envoyer les images que si le texte transcrit n'existe pas
+          enonceImages: controle.enonce_text ? [] : controle.enonce_images,
+          corrigeImages: controle.corrige_text ? [] : controle.corrige_images,
           enonceText: controle.enonce_text ?? undefined,
           corrigeText: controle.corrige_text ?? undefined,
         }),
@@ -316,11 +319,11 @@ export default function ConfigurerPage () {
                   {controle.enonce_images.length > 0 && (
                     <Button
                       onClick={() => transcribeDoc('enonce')}
-                      isLoading={transcribingDoc === 'enonce'}
+                      isLoading={transcribingEnonce}
                       className="gap-2 w-full"
                     >
-                      {transcribingDoc !== 'enonce' && <FileText className="h-4 w-4" />}
-                      {transcribingDoc === 'enonce' ? 'Transcription en cours...' : 'Transcrire l\'énoncé'}
+                      {!transcribingEnonce && <FileText className="h-4 w-4" />}
+                      {transcribingEnonce ? 'Transcription en cours...' : 'Transcrire l\'énoncé'}
                     </Button>
                   )}
                 </div>
@@ -371,11 +374,11 @@ export default function ConfigurerPage () {
                   {controle.corrige_images.length > 0 && (
                     <Button
                       onClick={() => transcribeDoc('corrige')}
-                      isLoading={transcribingDoc === 'corrige'}
+                      isLoading={transcribingCorrige}
                       className="gap-2 w-full"
                     >
-                      {transcribingDoc !== 'corrige' && <FileText className="h-4 w-4" />}
-                      {transcribingDoc === 'corrige' ? 'Transcription en cours...' : 'Transcrire le corrigé'}
+                      {!transcribingCorrige && <FileText className="h-4 w-4" />}
+                      {transcribingCorrige ? 'Transcription en cours...' : 'Transcrire le corrigé'}
                     </Button>
                   )}
                 </div>
@@ -484,7 +487,7 @@ export default function ConfigurerPage () {
                   onClick={generateBareme}
                   size="lg"
                   className="gap-2"
-                  disabled={controle.enonce_images.length === 0}
+                  disabled={controle.enonce_images.length === 0 || transcribingEnonce || transcribingCorrige}
                 >
                   <Sparkles className="h-4 w-4" />
                   Générer le barème
@@ -592,7 +595,7 @@ export default function ConfigurerPage () {
 
                 {/* Regenerate */}
                 <div className="flex justify-center">
-                  <Button variant="ghost" onClick={generateBareme} isLoading={isGenerating} size="sm" className="gap-2">
+                  <Button variant="ghost" onClick={generateBareme} isLoading={isGenerating} disabled={transcribingEnonce || transcribingCorrige} size="sm" className="gap-2">
                     <Sparkles className="h-3.5 w-3.5" />
                     Régénérer le barème
                   </Button>
@@ -656,13 +659,6 @@ function SectionCard ({
   const criteres = section.criteres ?? []
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
 
-  const hasQuestionColumn = useMemo(
-    () => criteres.some((c) => typeof c.question === 'string' && c.question.trim() !== ''),
-    [criteres]
-  )
-
-  const colCount = hasQuestionColumn ? 4 : 3
-
   const cardRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!cardRef.current) return
@@ -717,11 +713,6 @@ function SectionCard ({
               <table className="w-full border-collapse text-sm table-fixed">
                 <thead>
                   <tr className="bg-fond-alt">
-                    {hasQuestionColumn && (
-                      <th className="px-3 py-2.5 text-left text-xs font-medium text-texte-secondaire uppercase tracking-wide border-b border-bordure" style={{ width: '90px' }}>
-                        Question
-                      </th>
-                    )}
                     <th className="px-3 py-2.5 text-left text-xs font-medium text-texte-secondaire uppercase tracking-wide border-b border-bordure">
                       Critères d&apos;évaluation
                     </th>
@@ -734,17 +725,6 @@ function SectionCard ({
                 <tbody>
                   {criteres.map((critere, cIndex) => (
                     <tr key={cIndex} className="border-b border-bordure last:border-b-0 hover:bg-fond-alt/30 transition-colors">
-                      {hasQuestionColumn && (
-                        <td className="px-1 py-1">
-                          <input
-                            type="text"
-                            value={critere.question ?? ''}
-                            onChange={(e) => onUpdateCritere(cIndex, { question: e.target.value })}
-                            placeholder="1)a)"
-                            className="w-full px-2 py-1.5 text-sm text-center font-medium text-bleu-france bg-transparent border border-transparent rounded hover:border-bordure focus:border-bleu-france focus:outline-none transition-colors"
-                          />
-                        </td>
-                      )}
                       <td className="px-1 py-1">
                         <textarea
                           value={critere.description ?? ''}
@@ -785,7 +765,7 @@ function SectionCard ({
                 </tbody>
                 <tfoot>
                   <tr className="bg-fond-alt/50">
-                    <td colSpan={colCount} className="px-3 py-2">
+                    <td colSpan={3} className="px-3 py-2">
                       <button
                         type="button"
                         onClick={onAddCritere}

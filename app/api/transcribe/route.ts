@@ -26,31 +26,44 @@ export async function POST (req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { images, enonceImages } = body
+    const { images, enonceImages, enonceText } = body
 
-    if (!images?.length || !enonceImages?.length) {
+    if (!images?.length) {
       return NextResponse.json(
-        { error: 'Paramètres manquants : images et enonceImages requis' },
+        { error: 'Paramètres manquants : images requis' },
         { status: 400 }
       )
     }
 
-    log(`Début — ${images.length} img copie, ${enonceImages.length} img énoncé`)
+    if (!enonceText && !enonceImages?.length) {
+      return NextResponse.json(
+        { error: 'Paramètres manquants : enonceText ou enonceImages requis' },
+        { status: 400 }
+      )
+    }
+
+    // Mode texte : on injecte la transcription de l'énoncé directement dans le prompt
+    const useTextMode = !!enonceText
+    log(`Début — ${images.length} img copie, ${useTextMode ? 'mode texte (énoncé transcrit)' : `${enonceImages.length} img énoncé`}`)
 
     const env = {
       GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
       MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
     }
 
-    const prompt = getTranscriptionPrompt('[Voir images de l\'énoncé ci-jointes]')
+    const prompt = useTextMode
+      ? getTranscriptionPrompt(enonceText)
+      : getTranscriptionPrompt('[Voir images de l\'énoncé ci-jointes]')
 
-    // Préparer les images (énoncé + copie)
+    // Préparer les images (énoncé si pas de texte + copie)
     const allImages: ImageContent[] = []
 
-    for (const img of enonceImages) {
-      const match = img.match(/^data:([^;]+);base64,(.+)$/)
-      if (match) {
-        allImages.push({ mimeType: match[1], base64: match[2] })
+    if (!useTextMode) {
+      for (const img of enonceImages) {
+        const match = img.match(/^data:([^;]+);base64,(.+)$/)
+        if (match) {
+          allImages.push({ mimeType: match[1], base64: match[2] })
+        }
       }
     }
 

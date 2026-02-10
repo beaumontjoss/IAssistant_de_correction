@@ -58,8 +58,8 @@ ${enonce}`
 
 export function getBaremePrompt (matiere: string, classe: string, enonce: string, corrige?: string): string {
   const corrigeSection = corrige
-    ? `\n\n<corrige>\n${corrige}\n</corrige>`
-    : ''
+    ? `\n\nVoici le corrigé type fourni par l'enseignant :\n\n<corrige>\n${corrige}\n</corrige>`
+    : '\n\nAucun corrigé n\'a été fourni. Établis d\'abord un corrigé type de ce contrôle, puis propose un barème basé sur ce corrigé.'
 
   return `Tu es un assistant pédagogique expert. Ta tâche : proposer un barème détaillé et juste pour un contrôle de ${matiere} (classe de ${classe}).
 
@@ -67,7 +67,7 @@ RÈGLE FONDAMENTALE DE GRANULARITÉ :
 - Crée UNE section par question ou sous-question du contrôle (ex : "1a)", "1b)", "1c)", "2)", "3)", etc.)
 - NE REGROUPE JAMAIS plusieurs questions dans une même section (pas de "Grammaire", "Compréhension", etc.)
 - Chaque section = une question que le professeur corrigera individuellement sur la copie
-- Le titre de chaque section doit décrire précisément ce que la question demande (ex : "Identifier le groupe COD de « savourait »", "Réécrire au pluriel", etc.)
+- Le titre de chaque section doit décrire précisément ce que la question demande et comporter le numéro de la question ou de la sous-question (ex : "1)a) Identifier le groupe COD de « savourait »", "Réécrire au pluriel", etc.)
 - Exception : pour une dissertation, rédaction ou dictée (pas de questions numérotées), utilise des critères thématiques
 
 ADAPTATION AU TYPE D'ÉPREUVE :
@@ -77,6 +77,7 @@ ADAPTATION AU TYPE D'ÉPREUVE :
 - Dictée : critères par type de faute (orthographe lexicale, grammaticale, conjugaison, accents)
 
 Pour chaque section :
+- Le titre commence par le numéro de la question ou de la sous-questions
 - Le titre décrit précisément la question posée
 - Les critères détaillent ce qui rapporte ou fait perdre des points
 - Les points sont proportionnels à la difficulté

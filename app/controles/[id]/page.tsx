@@ -144,7 +144,9 @@ export default function ControlePage () {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           images: copy.images,
-          enonceImages: controle.enonce_images,
+          // N'envoyer les images de l'énoncé que si le texte transcrit n'existe pas
+          enonceImages: controle.enonce_text ? [] : controle.enonce_images,
+          enonceText: controle.enonce_text ?? undefined,
         }),
       })
       const result = await res.json()
@@ -595,9 +597,9 @@ export default function ControlePage () {
 
                                     {(copy.correction.questions ?? []).map((q) => (
                                       <div key={q.id} className="bg-fond-card rounded-lg p-4 border border-bordure">
-                                        <div className="flex items-center justify-between mb-2">
-                                          <p className="text-sm font-medium">{q.titre}</p>
-                                          <div className="flex items-center gap-2">
+                                        <div className="flex items-start justify-between gap-3 mb-2">
+                                          <p className="text-sm font-medium flex-1 min-w-0">{q.titre}</p>
+                                          <div className="flex items-center gap-2 flex-shrink-0 whitespace-nowrap">
                                             <input
                                               type="number"
                                               value={q.note}
@@ -615,14 +617,75 @@ export default function ControlePage () {
                                             <span className="text-xs text-texte-secondaire">/ {q.points_max}</span>
                                           </div>
                                         </div>
-                                        <p className="text-xs text-texte-secondaire">{q.justification}</p>
-                                        {(q.erreurs ?? []).length > 0 && (
-                                          <div className="mt-2 space-y-1">
-                                            {(q.erreurs ?? []).map((err, i) => (
-                                              <p key={i} className="text-xs text-error">• {err}</p>
-                                            ))}
-                                          </div>
-                                        )}
+                                        <textarea
+                                          value={q.justification ?? ''}
+                                          onChange={(e) => {
+                                            const newQuestions = (copy.correction!.questions ?? []).map((cq) =>
+                                              cq.id === q.id ? { ...cq, justification: e.target.value } : cq
+                                            )
+                                            updateCopyCorrection(copy.id, { questions: newQuestions })
+                                          }}
+                                          className="w-full text-xs text-texte-secondaire bg-transparent border border-transparent rounded px-1 py-1 hover:border-bordure focus:border-bleu-france focus:outline-none transition-colors resize-none overflow-hidden"
+                                          rows={1}
+                                          onInput={(e) => {
+                                            const ta = e.target as HTMLTextAreaElement
+                                            ta.style.height = 'auto'
+                                            ta.style.height = ta.scrollHeight + 'px'
+                                          }}
+                                          ref={(el) => {
+                                            if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
+                                          }}
+                                        />
+                                        <textarea
+                                          value={(q.erreurs ?? []).map((e) => `• ${e}`).join('\n')}
+                                          onChange={(e) => {
+                                            const lines = e.target.value.split('\n')
+                                            const erreurs = lines.map((l) => l.replace(/^•\s*/, ''))
+                                            const newQuestions = (copy.correction!.questions ?? []).map((cq) =>
+                                              cq.id === q.id ? { ...cq, erreurs } : cq
+                                            )
+                                            updateCopyCorrection(copy.id, { questions: newQuestions })
+                                          }}
+                                          onBlur={(e) => {
+                                            const lines = e.target.value.split('\n')
+                                            const erreurs = lines.map((l) => l.replace(/^•\s*/, '').trim()).filter(Boolean)
+                                            const newQuestions = (copy.correction!.questions ?? []).map((cq) =>
+                                              cq.id === q.id ? { ...cq, erreurs } : cq
+                                            )
+                                            updateCopyCorrection(copy.id, { questions: newQuestions })
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              e.preventDefault()
+                                              const ta = e.target as HTMLTextAreaElement
+                                              const pos = ta.selectionStart
+                                              const val = ta.value
+                                              const newVal = val.slice(0, pos) + '\n• ' + val.slice(pos)
+                                              const lines = newVal.split('\n')
+                                              const erreurs = lines.map((l) => l.replace(/^•\s*/, ''))
+                                              const newQuestions = (copy.correction!.questions ?? []).map((cq) =>
+                                                cq.id === q.id ? { ...cq, erreurs } : cq
+                                              )
+                                              updateCopyCorrection(copy.id, { questions: newQuestions })
+                                              requestAnimationFrame(() => {
+                                                ta.selectionStart = ta.selectionEnd = pos + 3
+                                                ta.style.height = 'auto'
+                                                ta.style.height = ta.scrollHeight + 'px'
+                                              })
+                                            }
+                                          }}
+                                          placeholder="Ajouter des remarques..."
+                                          className="w-full mt-1 text-xs text-error bg-transparent border border-transparent rounded px-1 py-1 hover:border-bordure focus:border-error/50 focus:outline-none transition-colors resize-none overflow-hidden"
+                                          rows={1}
+                                          onInput={(e) => {
+                                            const ta = e.target as HTMLTextAreaElement
+                                            ta.style.height = 'auto'
+                                            ta.style.height = ta.scrollHeight + 'px'
+                                          }}
+                                          ref={(el) => {
+                                            if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
+                                          }}
+                                        />
                                       </div>
                                     ))}
 
