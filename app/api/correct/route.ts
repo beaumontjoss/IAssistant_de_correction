@@ -23,7 +23,7 @@ export async function POST (req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { modelId, matiere, classe, severite, baremeJson, mdCopie, enonceText, corrigeText, previousCorrections } = body
+    const { modelId, matiere, classe, severite, baremeJson, mdCopie, enonceText, corrigeText } = body
 
     if (!modelId || !matiere || !classe || !severite || !baremeJson || !mdCopie) {
       return NextResponse.json(
@@ -32,8 +32,7 @@ export async function POST (req: NextRequest) {
       )
     }
 
-    const prevCount = Array.isArray(previousCorrections) ? previousCorrections.length : 0
-    log(`Début — modèle=${modelId}, copie=${mdCopie.length} chars, barème=${baremeJson.length} chars, ${prevCount} corrections précédentes`)
+    log(`Début — modèle=${modelId}, copie=${mdCopie.length} chars, barème=${baremeJson.length} chars`)
     if (enonceText) log(`📝 Énoncé fourni (${enonceText.length} chars) — sera mis en cache`)
     if (corrigeText) log(`📝 Corrigé fourni (${corrigeText.length} chars) — sera mis en cache`)
 
@@ -55,8 +54,7 @@ export async function POST (req: NextRequest) {
       baremeJson,
       mdCopie,
       enonceText || undefined,
-      corrigeText || undefined,
-      Array.isArray(previousCorrections) && previousCorrections.length > 0 ? previousCorrections : undefined
+      corrigeText || undefined
     )
 
     log(`Prompt construit — statique: ${staticContext.length} chars (cacheable), variable: ${variableContext.length} chars`)

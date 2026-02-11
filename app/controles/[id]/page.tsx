@@ -197,31 +197,15 @@ export default function ControlePage () {
 
   // ─── Correction ────────────────────────────────────────
 
-  // Construire le contexte des corrections précédentes pour assurer l'équité
-  const buildPreviousCorrections = useCallback((excludeCopyId: string) => {
-    return copies
-      .filter((c) => c.correction && c.id !== excludeCopyId)
-      .map((c) => ({
-        nom_eleve: c.nom_eleve,
-        note_globale: c.correction!.note_globale,
-        total: c.correction!.total,
-        questions: (c.correction!.questions ?? []).map((q) => ({
-          titre: q.titre,
-          note: q.note,
-          points_max: q.points_max,
-          justification: q.justification,
-          erreurs: q.erreurs ?? [],
-        })),
-      }))
-  }, [copies])
+  // Note : les corrections précédentes ne sont plus envoyées au LLM.
+  // À temperature 0 avec un barème détaillé, elles créaient un biais d'ancrage
+  // nuisant à l'indépendance de chaque évaluation. Le barème seul garantit la cohérence.
 
   const correctCopy = useCallback(async (copy: CopieEleve) => {
     if (!controle || !copy.transcription_md || !controle.bareme) return
 
     setCorrectingIds((prev) => new Set(prev).add(copy.id))
     try {
-      const previousCorrections = buildPreviousCorrections(copy.id)
-
       const res = await fetch('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -234,7 +218,6 @@ export default function ControlePage () {
           mdCopie: copy.transcription_md,
           enonceText: controle.enonce_text || null,
           corrigeText: controle.corrige_text || null,
-          previousCorrections: previousCorrections.length > 0 ? previousCorrections : undefined,
         }),
       })
       const result = await res.json()
@@ -256,7 +239,7 @@ export default function ControlePage () {
         return next
       })
     }
-  }, [controle, updateCopy, buildPreviousCorrections])
+  }, [controle, updateCopy])
 
   const correctAll = useCallback(async () => {
     const toCorrect = copies.filter((c) => c.transcription_validee && !c.correction)

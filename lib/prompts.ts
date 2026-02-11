@@ -190,18 +190,6 @@ export const CORRECTION_JSON_SCHEMA = {
   additionalProperties: false,
 }
 
-export interface PreviousCorrection {
-  nom_eleve: string
-  note_globale: number
-  total: number
-  questions: Array<{
-    titre: string
-    note: number
-    points_max: number
-    justification: string
-  }>
-}
-
 /**
  * Retourne le prompt de correction séparé en deux parties :
  * - staticContext : contenu identique pour toutes les copies d'un contrôle (cacheable)
@@ -214,8 +202,7 @@ export function getCorrectionPromptParts (
   baremeJson: string,
   mdCopie: string,
   enonce?: string,
-  corrige?: string,
-  previousCorrections?: PreviousCorrection[]
+  corrige?: string
 ): { staticContext: string; variableContext: string } {
   const severiteDescription: Record<string, string> = {
     indulgente: 'Indulgente : tu valorises l\'effort, les réponses partielles rapportent des points, tu es généreux sur l\'interprétation',
@@ -225,8 +212,6 @@ export function getCorrectionPromptParts (
 
   // ─── Générer la structure attendue dynamiquement depuis le barème ───
   const { sectionsList, exampleJson, evaluationInstructions } = buildBaremeStructure(baremeJson)
-
-  const hasPrevious = previousCorrections && previousCorrections.length > 0
 
   // ─── Partie statique (identique pour toutes les copies du contrôle) ───
   const enonceSection = enonce
@@ -261,31 +246,14 @@ Ta tâche :
 5. Calcule la note globale = somme des notes de toutes les sections
 6. Rédige un commentaire personnalisé bienveillant et constructif, en tutoyant l'élève
 7. Liste les points pédagogiques à travailler
-${hasPrevious ? '8. Assure la cohérence avec les corrections précédentes : même exigence, même barème appliqué\n' : ''}
+
 IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans texte avant ni après. Pas de bloc markdown.
 
 Format de sortie JSON EXACT :
 ${exampleJson}`
 
   // ─── Partie variable (spécifique à chaque copie) ───
-  let previousSection = ''
-  if (hasPrevious) {
-    const summaries = previousCorrections.map((pc) => {
-      const questionsDetail = pc.questions
-        .map((q) => `  - ${q.titre} : ${q.note}/${q.points_max} — ${q.justification}`)
-        .join('\n')
-      return `### ${pc.nom_eleve} — ${pc.note_globale}/${pc.total}\n${questionsDetail}`
-    }).join('\n\n')
-
-    previousSection = `CORRECTIONS PRÉCÉDENTES (pour assurer l'équité de notation) :
-Les copies suivantes ont déjà été corrigées pour ce même contrôle. Tu DOIS maintenir une cohérence de notation avec ces évaluations. Pour un même niveau de réponse, attribue un nombre de points similaire. Sois juste et équitable entre les élèves.
-
-${summaries}
-
-`
-  }
-
-  const variableContext = `${previousSection}Copie de l'élève (transcription fidèle) :
+  const variableContext = `Copie de l'élève (transcription fidèle) :
 ${mdCopie}`
 
   return { staticContext, variableContext }
@@ -299,11 +267,10 @@ export function getCorrectionPrompt (
   baremeJson: string,
   mdCopie: string,
   enonce?: string,
-  corrige?: string,
-  previousCorrections?: PreviousCorrection[]
+  corrige?: string
 ): string {
   const { staticContext, variableContext } = getCorrectionPromptParts(
-    matiere, classe, severite, baremeJson, mdCopie, enonce, corrige, previousCorrections
+    matiere, classe, severite, baremeJson, mdCopie, enonce, corrige
   )
   return `${staticContext}\n\n${variableContext}`
 }
