@@ -53,6 +53,16 @@ const ANECDOTES = [
   'Le père de Victor Hugo voulait qu\'il intègre Polytechnique. Il a préféré la littérature — et est devenu le plus grand poète français.',
   'Thomas Edison a été retiré de l\'école par sa mère après que son instituteur l\'a qualifié d\'« embrouillé ». Elle l\'a instruit à domicile.',
   'Avant 1965, les écoliers français écrivaient avec une plume Sergent-Major trempée dans un encrier en porcelaine rempli d\'encre violette.',
+  'En 1857, Mérimée a composé une dictée pour la cour impériale. Napoléon III a fait 75 fautes, l\'impératrice Eugénie 62… et l\'ambassadeur d\'Autriche seulement 3.',
+  'Molière a fait des études de droit et obtenu sa licence à Orléans. Il a renoncé à devenir avocat pour fonder une troupe de théâtre.',
+  'Alexandre Dumas père n\'a quasiment pas été à l\'école. Clerc de notaire à l\'adolescence, il s\'est formé seul en dévorant les livres.',
+  'Agatha Christie a appris à lire toute seule à 5 ans, contre l\'avis de sa mère qui voulait attendre ses 8 ans. Elle n\'a presque jamais fréquenté l\'école.',
+  'Winston Churchill a dû s\'y reprendre à trois fois pour être admis à l\'académie militaire de Sandhurst. Ses professeurs le considéraient comme un élève médiocre.',
+  'André Breton, le père du surréalisme, a commencé des études de médecine. C\'est en tant qu\'infirmier psychiatrique pendant la guerre de 14-18 qu\'il a découvert l\'inconscient et Freud.',
+  'George Sand a été éduquée par un précepteur qui lui enseignait le latin, la botanique et les maths — des matières alors réservées aux garçons.',
+  'En 2024, une élève française a obtenu le baccalauréat à l\'âge de 9 ans, en spécialités maths et physique-chimie. Le précédent record datait de 1989.',
+  'La même année que la dictée de Mérimée (1857), une circulaire ministérielle a imposé la dictée hebdomadaire à tous les écoliers de France.',
+  'Le Collège de Clermont, où Molière et Voltaire ont étudié, s\'appelle aujourd\'hui le lycée Louis-le-Grand — l\'un des plus prestigieux de France.',
 ]
 
 export default function ConfigurerPage () {
@@ -65,9 +75,7 @@ export default function ConfigurerPage () {
   const [isSaving, setIsSaving] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatingMessage, setGeneratingMessage] = useState('')
-  const [generatingElapsed, setGeneratingElapsed] = useState(0)
   const [currentAnecdote, setCurrentAnecdote] = useState(0)
-  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const anecdoteRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [reuploadTarget, setReuploadTarget] = useState<'enonce' | 'corrige' | null>(null)
   const [transcribingEnonce, setTranscribingEnonce] = useState(false)
@@ -163,19 +171,12 @@ export default function ConfigurerPage () {
 
     setIsGenerating(true)
     setGeneratingMessage('Préparation…')
-    setGeneratingElapsed(0)
     setCurrentAnecdote(Math.floor(Math.random() * ANECDOTES.length))
 
-    // Timer pour le temps écoulé
-    const startTime = Date.now()
-    elapsedRef.current = setInterval(() => {
-      setGeneratingElapsed(Math.round((Date.now() - startTime) / 1000))
-    }, 1000)
-
-    // Rotation des anecdotes toutes les 8 secondes
+    // Rotation des anecdotes toutes les 30 secondes
     anecdoteRef.current = setInterval(() => {
       setCurrentAnecdote((prev) => (prev + 1) % ANECDOTES.length)
-    }, 8000)
+    }, 30000)
 
     try {
       const res = await fetch('/api/generate-bareme', {
@@ -245,11 +246,9 @@ export default function ConfigurerPage () {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue'
       toast.error('Échec de la génération', { description: msg })
     } finally {
-      if (elapsedRef.current) clearInterval(elapsedRef.current)
       if (anecdoteRef.current) clearInterval(anecdoteRef.current)
       setIsGenerating(false)
       setGeneratingMessage('')
-      setGeneratingElapsed(0)
     }
   }, [controle, update])
 
@@ -567,10 +566,7 @@ export default function ConfigurerPage () {
                   {/* Spinner + message serveur */}
                   <div className="flex items-center gap-4">
                     <div className="h-10 w-10 border-3 border-bleu-france-light rounded-full animate-spin border-t-bleu-france flex-shrink-0" />
-                    <div>
-                      <p className="text-sm font-medium text-texte-primaire">{generatingMessage}</p>
-                      <p className="text-xs text-texte-secondaire">{generatingElapsed}s écoulées</p>
-                    </div>
+                    <p className="text-sm font-medium text-texte-primaire">{generatingMessage}</p>
                   </div>
 
                   {/* Anecdote rotative */}
