@@ -28,6 +28,24 @@ NOM: Prénom Nom
 ${enonce}`
 }
 
+/**
+ * Suffixe ajouté au prompt pour contourner le filtre RECITATION de Gemini.
+ * En demandant de numéroter les lignes, la sortie n'est plus une reproduction
+ * verbatim du texte original, ce qui empêche le blocage.
+ */
+export const RECITATION_WORKAROUND_SUFFIX = `
+
+IMPORTANT — CONTOURNEMENT TECHNIQUE : Ajoute un préfixe [L1], [L2], [L3]… au début de chaque ligne de texte (pas sur les lignes vides ni les séparateurs ---).
+Cela est nécessaire pour le traitement automatique et sera retiré ensuite.
+Tu DOIS quand même appliquer tout le formatage Markdown demandé (titres #, **gras**, *italiques*, > citations, etc.). Le préfixe [Lx] se place AVANT le Markdown, ex: [L1] # Titre, [L5] **2.** Question.`
+
+/**
+ * Nettoie les marqueurs de ligne [Lx] ajoutés par le contournement RECITATION.
+ */
+export function cleanLineNumbers (text: string): string {
+  return text.replace(/\[L\d+\]\s*/g, '')
+}
+
 export function getStructurationPrompt (texteOcr: string, enonce: string): string {
   return `Tu es un assistant de structuration. Tu reçois le texte brut extrait par OCR d'une copie manuscrite d'élève, ainsi que l'énoncé du contrôle.
 
@@ -82,9 +100,11 @@ Pour chaque section :
 - Le titre décrit brièvement la question posée
 - Les critères détaillent ce qui rapporte des points. Il faut qu'ils soient compréhensibles par une IA pour permettre une correction la plus juste possible de la copie de l'élève.
 - Les points sont proportionnels à la difficulté de la question.
-- La somme des points de chaque section doit être égale au total de points du barème.
 
-Le total de points dépend de l'épreuve (pas forcément sur 20). Adapte-le au niveau et au type de contrôle.
+Total de points :
+- La somme des points de chaque section doit être égale au total de points du barème.
+- La somme des points des critères de chaque section doit être égale au total de points de la section.
+- Le total de points dépend de l'épreuve (pas forcément sur 20). Adapte-le au niveau et au type de contrôle.
 
 Réponds UNIQUEMENT avec du JSON valide.
 
@@ -148,11 +168,11 @@ export const CORRECTION_JSON_SCHEMA = {
           titre: { type: 'string', description: 'Titre de la question' },
           note: { type: 'number', description: 'Points attribués pour cette question' },
           points_max: { type: 'number', description: 'Points maximum pour cette question' },
-          justification: { type: 'string', description: 'Explication détaillée de la note' },
+          justification: { type: 'string', description: 'Explication détaillée de la note, en tutoyant l\'élève (Tu as..., Tu n\'as pas...)' },
           erreurs: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Liste des erreurs identifiées',
+            description: 'Liste des erreurs identifiées, en tutoyant l\'élève',
           },
         },
         required: ['id', 'titre', 'note', 'points_max', 'justification', 'erreurs'],
@@ -164,7 +184,7 @@ export const CORRECTION_JSON_SCHEMA = {
       items: { type: 'string' },
       description: 'Conseils d\'amélioration pour l\'élève',
     },
-    commentaire: { type: 'string', description: 'Commentaire global sur la copie' },
+    commentaire: { type: 'string', description: 'Commentaire global bienveillant en tutoyant l\'élève' },
   },
   required: ['note_globale', 'total', 'questions', 'points_a_corriger', 'commentaire'],
   additionalProperties: false,
@@ -219,6 +239,8 @@ export function getCorrectionPromptParts (
 
   const staticContext = `Tu es un correcteur de copies de ${matiere}, niveau ${classe}. Tu dois corriger la copie d'un élève avec rigueur et bienveillance.
 
+TONALITÉ : Tu t'adresses DIRECTEMENT à l'élève en le tutoyant. Écris "Tu as bien identifié...", "Tu n'as pas pensé à...", "Tu confonds..." — JAMAIS "L'élève a...", "Le candidat...", "Il/Elle a...".
+
 Sévérité de correction : ${severiteDescription[severite] || severiteDescription.classique}
 ${enonceSection}${corrigeSection}
 Barème validé :
@@ -234,10 +256,10 @@ ${evaluationInstructions}
 Ta tâche :
 1. Évalue CHAQUE section listée ci-dessus — n'en oublie aucune, n'en fusionne aucune
 2. Pour chaque section, attribue une note entre 0 et points_max (demi-points autorisés ≥ 0.5)
-3. Justifie chaque note en détail
-4. Liste les erreurs commises pour chaque section
+3. Justifie chaque note en t'adressant directement à l'élève (tutoiement)
+4. Liste les erreurs commises pour chaque section, toujours en tutoyant l'élève
 5. Calcule la note globale = somme des notes de toutes les sections
-6. Rédige un commentaire personnalisé bienveillant et constructif
+6. Rédige un commentaire personnalisé bienveillant et constructif, en tutoyant l'élève
 7. Liste les points pédagogiques à travailler
 ${hasPrevious ? '8. Assure la cohérence avec les corrections précédentes : même exigence, même barème appliqué\n' : ''}
 IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans texte avant ni après. Pas de bloc markdown.
@@ -348,8 +370,8 @@ function buildBaremeStructure (baremeJson: string): {
       "titre": "${s.titre}",
       "note": 0,
       "points_max": ${s.points},
-      "justification": "[Justification détaillée]",
-      "erreurs": ["[Erreur ou point à améliorer]"]
+      "justification": "[Justification en tutoyant l'élève : Tu as bien..., Tu n'as pas...]",
+      "erreurs": ["[Erreur en tutoyant : Tu as oublié de..., Tu confonds...]"]
     }`
   }).join(',\n')
 
@@ -360,10 +382,10 @@ function buildBaremeStructure (baremeJson: string): {
 ${questionsExample}
   ],
   "points_a_corriger": [
-    "[Point pédagogique 1]",
-    "[Point pédagogique 2]"
+    "[Point pédagogique en tutoyant : Tu devrais revoir...]",
+    "[Point pédagogique en tutoyant : Pense à...]"
   ],
-  "commentaire": "[Commentaire personnalisé bienveillant]"
+  "commentaire": "[Commentaire bienveillant en tutoyant : Bravo pour..., Continue à...]"
 }`
 
   return { sectionsList, exampleJson, evaluationInstructions }

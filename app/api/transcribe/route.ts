@@ -7,14 +7,27 @@ import {
   buildMessagesWithImages,
   type ImageContent,
 } from '@/lib/api-clients'
-import { getTranscriptionPrompt } from '@/lib/prompts'
+import { getTranscriptionPrompt, RECITATION_WORKAROUND_SUFFIX, cleanLineNumbers } from '@/lib/prompts'
 import { logLLMCall } from '@/lib/llm-logger'
 
-// Pipeline fixe : Gemini 3 Flash → Gemini 3 Pro → Mistral OCR
-const PIPELINE = [
-  { id: 'gemini-3-flash', label: 'Gemini 3 Flash' },
-  { id: 'gemini-3-pro', label: 'Gemini 3 Pro' },
-  { id: 'mistral-ocr', label: 'Mistral OCR' },
+// Pipeline avec contournement RECITATION :
+// 1. Gemini Flash (prompt normal)
+// 2. Gemini Flash (prompt numéroté [Lx])
+// 3. Gemini Pro (prompt normal)
+// 4. Gemini Pro (prompt numéroté [Lx])
+// 5. Mistral OCR (fallback final)
+interface TranscriptionStep {
+  id: string
+  label: string
+  numbered: boolean
+}
+
+const PIPELINE: TranscriptionStep[] = [
+  { id: 'gemini-3-flash', label: 'Gemini 3 Flash', numbered: false },
+  { id: 'gemini-3-flash', label: 'Gemini 3 Flash [Lx]', numbered: true },
+  { id: 'gemini-3-pro', label: 'Gemini 3 Pro', numbered: false },
+  { id: 'gemini-3-pro', label: 'Gemini 3 Pro [Lx]', numbered: true },
+  { id: 'mistral-ocr', label: 'Mistral OCR', numbered: false },
 ]
 
 export async function POST (req: NextRequest) {
@@ -78,23 +91,62 @@ export async function POST (req: NextRequest) {
     log(`${allImages.length} images préparées (${(totalImgSize / 1024).toFixed(0)} KB base64)`)
 
     const errors: string[] = []
+    const skipLabels = new Set<string>()
 
-    // --- Tentative 1 & 2 : Gemini Flash puis Gemini Pro ---
-    for (const model of PIPELINE.filter((m) => m.id !== 'mistral-ocr')) {
+    for (const step of PIPELINE) {
+      if (skipLabels.has(step.label)) continue
+
       try {
-        log(`Tentative ${model.label}...`)
-        const messages = buildMessagesWithImages(prompt, allImages, model.id)
-        const result = await callLLM(model.id, messages, env)
-        log(`✅ Réussi avec ${model.label} (${result.length} chars)`)
+        log(`Tentative ${step.label}...`)
+
+        let result: string
+        let promptSent: string
+
+        if (step.id === 'mistral-ocr') {
+          // Mistral OCR : API dédiée, image par image (copie uniquement)
+          if (!env.MISTRAL_API_KEY) throw new Error('Clé API Mistral non configurée')
+
+          let rawText = ''
+          for (let i = 0; i < images.length; i++) {
+            const match = images[i].match(/^data:([^;]+);base64,(.+)$/)
+            if (!match) continue
+            log(`Mistral OCR — page ${i + 1}/${images.length}`)
+            rawText += await callMistralOCR(match[2], match[1], env.MISTRAL_API_KEY)
+            rawText += '\n\n'
+          }
+          result = rawText.trim()
+          promptSent = `[Mistral OCR — ${images.length} pages de copie]`
+        } else {
+          // Gemini : multimodal, toutes les images en une seule requête
+          const effectivePrompt = step.numbered
+            ? prompt + RECITATION_WORKAROUND_SUFFIX
+            : prompt
+          const messages = buildMessagesWithImages(effectivePrompt, allImages, step.id)
+          result = await callLLM(step.id, messages, env, {
+            thinkingLevel: 'low',
+          })
+          promptSent = effectivePrompt
+
+          // Nettoyer les [Lx] si le prompt numéroté a été utilisé
+          if (step.numbered && result) {
+            result = cleanLineNumbers(result)
+          }
+        }
+
+        if (!result || result.trim().length < 20) {
+          throw new Error(`Réponse trop courte (${result?.length ?? 0} chars)`)
+        }
+
+        log(`✅ ${step.label} (${result.length} chars)`)
         const { transcription, nom_eleve } = extractStudentName(result)
         if (nom_eleve) log(`📛 Nom extrait : ${nom_eleve}`)
 
         logLLMCall({
           type: 'transcription-copie',
-          model: model.id,
-          provider: 'google',
-          prompt: { full: prompt },
-          messages: [{ role: 'user', content: `${prompt}\n\n[${allImages.length} images jointes — non incluses dans le log]` }],
+          model: step.id,
+          provider: step.id === 'mistral-ocr' ? 'mistral' : 'google',
+          prompt: { full: promptSent },
+          messages: [{ role: 'user', content: `${promptSent}\n\n[${allImages.length} images jointes — non incluses dans le log]` }],
           options: {},
           response_raw: result,
           response_parsed: { transcription, nom_eleve },
@@ -103,62 +155,30 @@ export async function POST (req: NextRequest) {
             timestamp: new Date().toISOString(),
             images_count: allImages.length,
             images_size_kb: Math.round(totalImgSize / 1024),
-            failed_models: errors.length > 0 ? errors : undefined,
+            failed_steps: errors.length > 0 ? errors : undefined,
+            numbered_workaround: step.numbered,
           },
         })
 
-        return NextResponse.json({ transcription, nom_eleve, model: model.id })
+        return NextResponse.json({ transcription, nom_eleve, model: step.id })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Erreur inconnue'
-        log(`⚠️ Échec ${model.label}: ${msg}`)
-        errors.push(`${model.label}: ${msg}`)
+        const isRecitation = msg.includes('RECITATION')
+        log(`⚠️ ${step.label} échoué${isRecitation ? ' (RECITATION)' : ''}: ${msg}`)
+        errors.push(`${step.label}: ${msg}`)
+
+        // Si l'erreur n'est PAS RECITATION → inutile de retenter le même modèle avec [Lx]
+        if (!isRecitation && !step.numbered && step.id !== 'mistral-ocr') {
+          const numberedLabel = PIPELINE.find(
+            (s) => s.id === step.id && s.numbered
+          )?.label
+          if (numberedLabel) {
+            log(`⏭️ Skip ${numberedLabel} (erreur non-RECITATION)`)
+            errors.push(`${numberedLabel}: skipped (non-RECITATION error)`)
+            skipLabels.add(numberedLabel)
+          }
+        }
       }
-    }
-
-    // --- Fallback final : Mistral OCR ---
-    try {
-      log('Fallback Mistral OCR...')
-
-      if (!env.MISTRAL_API_KEY) {
-        throw new Error('Clé API Mistral non configurée')
-      }
-
-      let rawText = ''
-      // Pour Mistral OCR, on n'envoie que les images de la copie (pas l'énoncé)
-      for (let i = 0; i < images.length; i++) {
-        const match = images[i].match(/^data:([^;]+);base64,(.+)$/)
-        if (!match) continue
-        log(`Mistral OCR — page ${i + 1}/${images.length}`)
-        rawText += await callMistralOCR(match[2], match[1], env.MISTRAL_API_KEY)
-        rawText += '\n\n'
-      }
-
-      log(`✅ Réussi avec Mistral OCR (${rawText.length} chars)`)
-      const { transcription, nom_eleve } = extractStudentName(rawText.trim())
-      if (nom_eleve) log(`📛 Nom extrait : ${nom_eleve}`)
-
-      logLLMCall({
-        type: 'transcription-copie',
-        model: 'mistral-ocr',
-        provider: 'mistral',
-        prompt: { full: '[Mistral OCR — images envoyées individuellement, pas de prompt textuel]' },
-        messages: [{ role: 'user', content: `[Mistral OCR — ${images.length} pages de copie]` }],
-        options: {},
-        response_raw: rawText.trim(),
-        response_parsed: { transcription, nom_eleve },
-        meta: {
-          elapsed_ms: Math.round(performance.now() - t0),
-          timestamp: new Date().toISOString(),
-          images_count: images.length,
-          failed_models: errors,
-        },
-      })
-
-      return NextResponse.json({ transcription, nom_eleve, model: 'mistral-ocr' })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Erreur inconnue'
-      log(`❌ Échec Mistral OCR: ${msg}`)
-      errors.push(`Mistral OCR: ${msg}`)
     }
 
     // Tous les modèles ont échoué

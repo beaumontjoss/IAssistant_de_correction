@@ -19,8 +19,6 @@ import {
   MATIERES,
   CORRECTION_MODELS,
   type Controle,
-  type ControleMode,
-  type BaremeInputMode,
   type Severite,
   type BaremeQuestion,
   type BaremeCritere,
@@ -39,10 +37,22 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 
-const LOADING_STEPS = [
-  { key: 'enonce', label: 'Lecture de l\'énoncé' },
-  { key: 'corrige', label: 'Analyse du corrigé' },
-  { key: 'generation', label: 'Création du barème' },
+// Anecdotes insolites et vérifiées sur l'éducation
+const ANECDOTES = [
+  'Émile Zola a échoué deux fois au baccalauréat, en 1859. Il n\'a jamais obtenu le diplôme.',
+  'Napoléon est sorti 42e sur 58 de l\'École militaire de Paris, en 1785.',
+  'Le baccalauréat a été créé par Napoléon en 1808. La première session, en 1809, ne comptait que 33 reçus… et uniquement des épreuves orales, en latin et en grec.',
+  'Julie-Victoire Daubié est devenue la première femme bachelière de France en 1861, à 37 ans. Le ministre a d\'abord refusé de signer son diplôme, qu\'il jugeait « ridicule ».',
+  'Pierre Curie n\'est jamais allé à l\'école. Instruit à domicile par son père, il a obtenu son bac à 16 ans… puis le prix Nobel.',
+  'Le stylo à bille était interdit dans les écoles françaises. Il a fallu attendre une circulaire ministérielle de septembre 1965 pour l\'autoriser en classe.',
+  'Jules Ferry a rendu l\'école primaire gratuite en 1881, puis obligatoire en 1882. Avant cela, seuls les enfants de familles aisées allaient à l\'école.',
+  'Albert Einstein n\'a jamais été mauvais en maths — c\'est un mythe tenace. Il excellait en mathématiques et en physique dès le lycée.',
+  'Le mot « baccalauréat » vient du latin bacca laurea, la « baie de laurier », symbole de victoire dans l\'Antiquité.',
+  'Jacques Prévert a quitté l\'école à 15 ans, sans aucun diplôme. Cela ne l\'a pas empêché d\'écrire des poèmes que tous les écoliers apprennent encore.',
+  'En 1900, seuls 1 % des Français obtenaient le baccalauréat. Aujourd\'hui, le taux de réussite dépasse les 85 %.',
+  'Le père de Victor Hugo voulait qu\'il intègre Polytechnique. Il a préféré la littérature — et est devenu le plus grand poète français.',
+  'Thomas Edison a été retiré de l\'école par sa mère après que son instituteur l\'a qualifié d\'« embrouillé ». Elle l\'a instruit à domicile.',
+  'Avant 1965, les écoliers français écrivaient avec une plume Sergent-Major trempée dans un encrier en porcelaine rempli d\'encre violette.',
 ]
 
 export default function ConfigurerPage () {
@@ -54,7 +64,11 @@ export default function ConfigurerPage () {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [loadingStep, setLoadingStep] = useState(0)
+  const [generatingMessage, setGeneratingMessage] = useState('')
+  const [generatingElapsed, setGeneratingElapsed] = useState(0)
+  const [currentAnecdote, setCurrentAnecdote] = useState(0)
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const anecdoteRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [reuploadTarget, setReuploadTarget] = useState<'enonce' | 'corrige' | null>(null)
   const [transcribingEnonce, setTranscribingEnonce] = useState(false)
   const [transcribingCorrige, setTranscribingCorrige] = useState(false)
@@ -143,60 +157,99 @@ export default function ConfigurerPage () {
     }
   }, [controle, router])
 
-  // ─── Barème generation ─────────────────────────────────
+  // ─── Barème generation (SSE) ─────────────────────────────
   const generateBareme = useCallback(async () => {
     if (!controle) return
 
     setIsGenerating(true)
-    setLoadingStep(0)
+    setGeneratingMessage('Préparation…')
+    setGeneratingElapsed(0)
+    setCurrentAnecdote(Math.floor(Math.random() * ANECDOTES.length))
+
+    // Timer pour le temps écoulé
+    const startTime = Date.now()
+    elapsedRef.current = setInterval(() => {
+      setGeneratingElapsed(Math.round((Date.now() - startTime) / 1000))
+    }, 1000)
+
+    // Rotation des anecdotes toutes les 8 secondes
+    anecdoteRef.current = setInterval(() => {
+      setCurrentAnecdote((prev) => (prev + 1) % ANECDOTES.length)
+    }, 8000)
 
     try {
-      setLoadingStep(0)
-      await new Promise((r) => setTimeout(r, 600))
-
-      if (controle.corrige_images.length > 0) {
-        setLoadingStep(1)
-        await new Promise((r) => setTimeout(r, 500))
-      }
-
-      setLoadingStep(2)
-
-      // Mode simple : toujours envoyer images + forcer Opus 4.6
-      // Mode avancé : respecter le choix bareme_input (images ou texte)
-      const isSimple = controle.mode === 'simple'
-      const modelId = isSimple ? 'claude-opus-4-6' : controle.modele_bareme
-      const sendText = !isSimple && controle.bareme_input === 'texte'
-
       const res = await fetch('/api/generate-bareme', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          modelId,
+          modelId: controle.modele_bareme,
           matiere: controle.matiere,
           classe: controle.classe,
-          enonceImages: sendText ? [] : controle.enonce_images,
-          corrigeImages: sendText ? [] : controle.corrige_images,
-          enonceText: sendText ? (controle.enonce_text ?? undefined) : undefined,
-          corrigeText: sendText ? (controle.corrige_text ?? undefined) : undefined,
+          enonceImages: [],
+          corrigeImages: [],
+          enonceText: controle.enonce_text ?? undefined,
+          corrigeText: controle.corrige_text ?? undefined,
         }),
       })
 
-      const result = await res.json()
-      if (!res.ok) throw new Error(result.error || 'Erreur lors de la génération')
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Erreur serveur' }))
+        throw new Error(errorData.error || `Erreur HTTP ${res.status}`)
+      }
 
-      update({
-        bareme: result.bareme,
-        enonce_text: result.enonceText ?? null,
-        corrige_text: result.corrigeText ?? null,
-      })
-      toast.success('Barème prêt', { description: 'Vous pouvez l\'ajuster avant de continuer.' })
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('Pas de flux de réponse')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // Parser les événements SSE dans le buffer
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? '' // Garder la dernière ligne incomplète
+
+        let eventType = ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventType = line.slice(7)
+          } else if (line.startsWith('data: ') && eventType) {
+            try {
+              const data = JSON.parse(line.slice(6))
+
+              if (eventType === 'step') {
+                setGeneratingMessage(data.message)
+              } else if (eventType === 'result') {
+                update({
+                  bareme: data.bareme,
+                  enonce_text: data.enonceText ?? controle.enonce_text,
+                  corrige_text: data.corrigeText ?? controle.corrige_text,
+                })
+                toast.success('Barème prêt', { description: 'Vous pouvez l\'ajuster avant de continuer.' })
+              } else if (eventType === 'error') {
+                throw new Error(data.error)
+              }
+            } catch (parseErr) {
+              if (eventType === 'error') throw parseErr
+            }
+            eventType = ''
+          }
+        }
+      }
     } catch (err) {
       console.error(err)
       const msg = err instanceof Error ? err.message : 'Erreur inconnue'
       toast.error('Échec de la génération', { description: msg })
     } finally {
+      if (elapsedRef.current) clearInterval(elapsedRef.current)
+      if (anecdoteRef.current) clearInterval(anecdoteRef.current)
       setIsGenerating(false)
-      setLoadingStep(0)
+      setGeneratingMessage('')
+      setGeneratingElapsed(0)
     }
   }, [controle, update])
 
@@ -313,8 +366,8 @@ export default function ConfigurerPage () {
             {/* Énoncé */}
             <div className="space-y-2">
               <p className="text-sm font-medium text-texte-primaire">Énoncé du contrôle</p>
-              {controle.mode === 'simple' || !controle.enonce_text ? (
-                /* Mode simple OU pas encore transcrit → upload */
+              {!controle.enonce_text ? (
+                /* Pas encore transcrit → upload + bouton transcrire */
                 <div className="space-y-3">
                   <FileUpload
                     label=""
@@ -323,7 +376,7 @@ export default function ConfigurerPage () {
                     onFilesChange={(files) => update({ enonce_images: files })}
                     processFiles={(files) => processFiles(files)}
                   />
-                  {controle.mode === 'avance' && controle.enonce_images.length > 0 && (
+                  {controle.enonce_images.length > 0 && (
                     <Button
                       onClick={() => transcribeDoc('enonce')}
                       isLoading={transcribingEnonce}
@@ -335,7 +388,7 @@ export default function ConfigurerPage () {
                   )}
                 </div>
               ) : (
-                /* Mode avancé + transcription faite → side-by-side */
+                /* Transcription faite → side-by-side */
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div>
@@ -368,8 +421,8 @@ export default function ConfigurerPage () {
             {/* Corrigé */}
             <div className="space-y-2">
               <p className="text-sm font-medium text-texte-primaire">Corrigé (optionnel)</p>
-              {controle.mode === 'simple' || !controle.corrige_text ? (
-                /* Mode simple OU pas encore transcrit → upload */
+              {!controle.corrige_text ? (
+                /* Pas encore transcrit → upload + bouton transcrire */
                 <div className="space-y-3">
                   <FileUpload
                     label=""
@@ -378,7 +431,7 @@ export default function ConfigurerPage () {
                     onFilesChange={(files) => update({ corrige_images: files })}
                     processFiles={(files) => processFiles(files)}
                   />
-                  {controle.mode === 'avance' && controle.corrige_images.length > 0 && (
+                  {controle.corrige_images.length > 0 && (
                     <Button
                       onClick={() => transcribeDoc('corrige')}
                       isLoading={transcribingCorrige}
@@ -390,7 +443,7 @@ export default function ConfigurerPage () {
                   )}
                 </div>
               ) : (
-                /* Mode avancé + transcription faite → side-by-side */
+                /* Transcription faite → side-by-side */
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div>
@@ -425,30 +478,13 @@ export default function ConfigurerPage () {
         {/* Section 2 : Paramètres */}
         <Card>
           <CardContent className="space-y-6">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-lg bg-bleu-france-light flex items-center justify-center">
-                  <Settings className="h-5 w-5 text-bleu-france" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-texte-primaire">Paramètres</h3>
-                  <p className="text-sm text-texte-secondaire">Configurez le contexte du contrôle</p>
-                </div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="h-10 w-10 rounded-lg bg-bleu-france-light flex items-center justify-center">
+                <Settings className="h-5 w-5 text-bleu-france" />
               </div>
-              {/* Toggle simple / avancé */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => update({ mode: controle.mode === 'simple' ? 'avance' : 'simple' })}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
-                    controle.mode === 'avance' ? 'bg-bleu-france' : 'bg-bordure'
-                  }`}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    controle.mode === 'avance' ? 'translate-x-6' : 'translate-x-1'
-                  }`} />
-                </button>
-                <span className="text-xs text-texte-secondaire">Avancé</span>
+              <div>
+                <h3 className="text-lg font-bold text-texte-primaire">Paramètres</h3>
+                <p className="text-sm text-texte-secondaire">Configurez le contexte du contrôle</p>
               </div>
             </div>
 
@@ -474,60 +510,21 @@ export default function ConfigurerPage () {
               />
             </div>
 
-            {controle.mode === 'avance' && (
-              <>
-                <SeverityToggle
-                  value={controle.severite}
-                  onChange={(severite: Severite) => update({ severite })}
-                />
+            <SeverityToggle
+              value={controle.severite}
+              onChange={(severite: Severite) => update({ severite })}
+            />
 
-                <Select
-                  label="Modèle pour le barème"
-                  hint="IA utilisée pour générer le barème à partir de l'énoncé"
-                  value={controle.modele_bareme}
-                  onChange={(e) => update({ modele_bareme: e.target.value })}
-                  options={CORRECTION_MODELS.map((m) => ({
-                    value: m.id,
-                    label: m.label,
-                  }))}
-                />
-
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-texte-primaire">Envoi au LLM</p>
-                  <p className="text-xs text-texte-secondaire">Choisissez ce qui est transmis à l&apos;IA pour la génération du barème</p>
-                  <div className="flex rounded-lg border border-bordure overflow-hidden">
-                    {([
-                      { value: 'images' as BaremeInputMode, label: 'Images', icon: '🖼️' },
-                      { value: 'texte' as BaremeInputMode, label: 'Texte transcrit', icon: '📝' },
-                    ]).map((opt) => {
-                      const isActive = controle.bareme_input === opt.value
-                      const isDisabled = opt.value === 'texte' && !controle.enonce_text
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => { if (!isDisabled) update({ bareme_input: opt.value }) }}
-                          disabled={isDisabled}
-                          className={`flex-1 px-4 py-2.5 text-sm font-medium transition-all cursor-pointer ${
-                            isActive
-                              ? 'bg-bleu-france text-white'
-                              : isDisabled
-                                ? 'bg-fond-alt text-texte-disabled cursor-not-allowed'
-                                : 'bg-fond-card text-texte-secondaire hover:bg-fond-alt'
-                          }`}
-                        >
-                          <span className="mr-1.5">{opt.icon}</span>
-                          {opt.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {controle.bareme_input === 'texte' && !controle.enonce_text && (
-                    <p className="text-xs text-amber-600">Transcrivez d&apos;abord l&apos;énoncé pour utiliser le mode texte</p>
-                  )}
-                </div>
-              </>
-            )}
+            <Select
+              label="Modèle pour le barème"
+              hint="IA utilisée pour générer le barème à partir de l'énoncé"
+              value={controle.modele_bareme}
+              onChange={(e) => update({ modele_bareme: e.target.value })}
+              options={CORRECTION_MODELS.map((m) => ({
+                value: m.id,
+                label: m.label,
+              }))}
+            />
           </CardContent>
         </Card>
 
@@ -550,52 +547,48 @@ export default function ConfigurerPage () {
                   onClick={generateBareme}
                   size="lg"
                   className="gap-2"
-                  disabled={controle.enonce_images.length === 0 || (controle.mode === 'avance' && (transcribingEnonce || transcribingCorrige))}
+                  disabled={!controle.enonce_text || transcribingEnonce || transcribingCorrige}
                 >
                   <Sparkles className="h-4 w-4" />
                   Générer le barème
                 </Button>
+                {!controle.enonce_text && controle.enonce_images.length > 0 && (
+                  <p className="text-xs text-amber-600">Transcrivez d&apos;abord l&apos;énoncé avant de générer le barème</p>
+                )}
               </CardContent>
             </Card>
           )}
 
-          {/* Loading */}
+          {/* Loading avec anecdotes */}
           {isGenerating && (
             <Card>
               <CardContent className="py-10">
                 <div className="flex flex-col items-center gap-6">
-                  <div className="h-14 w-14 border-4 border-bleu-france-light rounded-full animate-spin border-t-bleu-france" />
-                  <div className="w-full max-w-xs space-y-3">
-                    {LOADING_STEPS
-                      .filter((_, i) => i !== 1 || controle.corrige_images.length > 0)
-                      .map((step, i) => {
-                        const stepIndex = LOADING_STEPS.indexOf(step)
-                        const isActive = loadingStep === stepIndex
-                        const isDone = loadingStep > stepIndex
-                        return (
-                          <div key={step.key} className="flex items-center gap-3">
-                            <div className={`h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
-                              isDone ? 'bg-bleu-france text-white'
-                                : isActive ? 'border-2 border-bleu-france bg-bleu-france-light'
-                                  : 'border-2 border-bordure bg-fond-alt'
-                            }`}>
-                              {isDone ? (
-                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              ) : (
-                                <span className={`text-xs font-medium ${isActive ? 'text-bleu-france' : 'text-texte-disabled'}`}>{i + 1}</span>
-                              )}
-                            </div>
-                            <span className={`text-sm transition-colors duration-300 ${
-                              isActive ? 'text-texte-primaire font-medium' : isDone ? 'text-texte-secondaire' : 'text-texte-disabled'
-                            }`}>
-                              {step.label}{isActive ? '...' : ''}
-                            </span>
-                          </div>
-                        )
-                      })}
+                  {/* Spinner + message serveur */}
+                  <div className="flex items-center gap-4">
+                    <div className="h-10 w-10 border-3 border-bleu-france-light rounded-full animate-spin border-t-bleu-france flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-texte-primaire">{generatingMessage}</p>
+                      <p className="text-xs text-texte-secondaire">{generatingElapsed}s écoulées</p>
+                    </div>
                   </div>
+
+                  {/* Anecdote rotative */}
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={currentAnecdote}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.4 }}
+                      className="max-w-md text-center"
+                    >
+                      <p className="text-xs font-medium text-bleu-france mb-1.5">Le saviez-vous ?</p>
+                      <p className="text-sm text-texte-secondaire leading-relaxed italic">
+                        {ANECDOTES[currentAnecdote]}
+                      </p>
+                    </motion.div>
+                  </AnimatePresence>
                 </div>
               </CardContent>
             </Card>
@@ -658,7 +651,7 @@ export default function ConfigurerPage () {
 
                 {/* Regenerate */}
                 <div className="flex justify-center">
-                  <Button variant="ghost" onClick={generateBareme} isLoading={isGenerating} disabled={transcribingEnonce || transcribingCorrige} size="sm" className="gap-2">
+                  <Button variant="ghost" onClick={generateBareme} isLoading={isGenerating} disabled={!controle.enonce_text || transcribingEnonce || transcribingCorrige} size="sm" className="gap-2">
                     <Sparkles className="h-3.5 w-3.5" />
                     Régénérer le barème
                   </Button>

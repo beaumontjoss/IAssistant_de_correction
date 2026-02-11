@@ -3,32 +3,76 @@ export const maxDuration = 300
 import { NextRequest, NextResponse } from 'next/server'
 import { callLLM, callMistralOCR, buildMessagesWithImages, type ImageContent } from '@/lib/api-clients'
 import { logLLMCall } from '@/lib/llm-logger'
+import { RECITATION_WORKAROUND_SUFFIX, cleanLineNumbers } from '@/lib/prompts'
 
-// Prompt reformulé pour éviter le filtre RECITATION de Gemini :
-// - contexte éducatif explicite
-// - reformulation autorisée si blocage
 const TRANSCRIPTION_DOC_PROMPT = `Tu es un assistant pédagogique qui aide un enseignant à numériser ses documents de cours.
 L'enseignant te fournit des photos d'un document scolaire (contrôle, exercice, ou corrigé) qu'il a lui-même rédigé.
-Ton rôle est de produire une version texte structurée de ce document pour qu'il puisse l'utiliser dans son outil de correction.
+Ton rôle est de produire une transcription **richement formatée en Markdown**, lisible et fidèle au document original.
 
-Instructions :
-- Restitue le contenu complet du document en Markdown.
+RÈGLES DE FORMATAGE MARKDOWN (obligatoires) :
+- # pour le titre principal du document (nom de l'examen, matière)
+- ## pour les grandes sections (A. Texte littéraire, B. Image, Grammaire, Compréhension…)
+- ### pour les sous-sections ou groupes de questions
+- **gras** pour les éléments importants : série, durée, barème/points, mots-clés de consignes
+- *italiques* pour les textes introductifs, chapeaux, contextualisations
+- > citation pour les consignes générales (instructions de début de sujet)
+- --- entre chaque page du document (séparateur de page)
+- Numérotation fidèle des questions (**1.**, **a.**, **b.**, etc.) en conservant la hiérarchie originale
+- AÉRATION : insère une ligne vide entre chaque élément (titre, paragraphe, question, consigne, note) pour reproduire visuellement l'espacement du document original. Chaque question, chaque sous-question, chaque bloc de texte doit être séparé par une ligne vide. Le rendu doit être aussi aéré que le document papier.
+
+RÈGLES DE CONTENU :
+- Restitue le contenu COMPLET du document, sans rien omettre ni résumer.
 - Conserve la structure originale (titres, numérotation, sous-parties, consignes).
-- Sois fidèle au contenu : n'invente rien, ne résume pas.
-- Si un passage est difficile à lire, fais de ton mieux et signale les incertitudes avec [illisible].
+- Sois fidèle au contenu : n'invente rien.
+- Si un passage est difficile à lire, signale avec [illisible].
+- Pour les pieds de page (références, numéros de page), place-les en italique en fin de section.
 
-Pour les éléments visuels (graphiques, schémas, figures, cartes, diagrammes) :
-- Décris-les en détail entre balises [FIGURE: ...]
-- Précise : type de visuel, axes et légendes, valeurs chiffrées, formes géométriques, relations spatiales, couleurs significatives
-- Exemple : [FIGURE: Graphique en barres montrant la température moyenne (°C) en ordonnée et les mois (Jan-Déc) en abscisse. Valeurs : Jan=5, Fév=6, Mar=10, Avr=13, Mai=17, Jun=21, Jul=24, Aoû=23, Sep=20, Oct=15, Nov=9, Déc=6]
-- Exemple : [FIGURE: Triangle ABC rectangle en A. AB = 5 cm, AC = 12 cm. Angle B marqué α. Hauteur AH tracée vers BC.]
+ÉLÉMENTS SPÉCIAUX :
+- Visuels (graphiques, schémas, figures) : décris-les en détail entre balises [FIGURE: description détaillée incluant type, axes, légendes, valeurs, formes, couleurs]
+- Tableaux : syntaxe Markdown de tableau
+- Formules mathématiques : notation LaTeX entre $ ou $$
+- Notes de bas de page : utilise le format "1 - mot : définition" en fin de section
 
-Pour les tableaux, utilise la syntaxe Markdown de tableau.
-Pour les formules mathématiques, utilise la notation LaTeX entre $ ou $$.`
+EXEMPLE DE RENDU ATTENDU :
+\`\`\`
+# DIPLÔME NATIONAL DU BREVET — SESSION 2024
 
-// Modèles à essayer dans l'ordre (fallback si RECITATION ou erreur)
-// 'mistral-ocr' est traité à part car API différente (OCR dédié, image par image)
-const TRANSCRIPTION_MODELS = ['gemini-3-flash', 'gemini-3-pro', 'mistral-ocr'] as const
+## MATHÉMATIQUES — Série générale
+
+**Durée : 2 h 00 | 100 points**
+
+> L'utilisation de la calculatrice est autorisée.
+> Ce sujet comporte 6 pages.
+
+---
+
+## Exercice 1 — Géométrie **(25 points)**
+
+**1.** Calculer la longueur $AB$ dans le triangle ci-dessous.
+
+**2.** En déduire l'aire du triangle $ABC$.
+\`\`\``
+
+// Pipeline de transcription pour documents officiels (énoncé/corrigé).
+// Les documents officiels déclenchent quasi systématiquement RECITATION,
+// donc on commence directement par le prompt numéroté [Lx] pour éviter
+// de perdre ~13s sur un premier essai voué à l'échec.
+// 1. Gemini Flash [Lx] (prompt numéroté — contournement RECITATION)
+// 2. Gemini Pro [Lx]
+// 3. Gemini Flash (prompt normal — au cas où [Lx] échoue pour autre raison)
+// 4. Mistral OCR (fallback final)
+interface TranscriptionStep {
+  model: string
+  label: string
+  numbered: boolean
+}
+
+const PIPELINE: TranscriptionStep[] = [
+  { model: 'gemini-3-flash', label: 'Gemini Flash [Lx]', numbered: true },
+  { model: 'gemini-3-pro', label: 'Gemini Pro [Lx]', numbered: true },
+  { model: 'gemini-3-flash', label: 'Gemini Flash', numbered: false },
+  { model: 'mistral-ocr', label: 'Mistral OCR', numbered: false },
+]
 
 export async function POST (req: NextRequest) {
   const t0 = performance.now()
@@ -68,19 +112,22 @@ export async function POST (req: NextRequest) {
     const totalKb = Math.round(parsed.reduce((s, i) => s + i.base64.length, 0) / 1024)
     log(`${parsed.length} images (${totalKb} KB)`)
 
-    // Essayer les modèles dans l'ordre avec fallback
+    // Pipeline de transcription avec contournement RECITATION
     let lastError: Error | null = null
-    const failedModels: string[] = []
+    const failedSteps: string[] = []
+    const skipLabels = new Set<string>()
 
-    for (const modelId of TRANSCRIPTION_MODELS) {
+    for (const step of PIPELINE) {
+      if (skipLabels.has(step.label)) continue
+
       try {
-        log(`Appel ${modelId}...`)
+        log(`Tentative ${step.label}...`)
 
         let result: string
         let promptSent: string
 
-        if (modelId === 'mistral-ocr') {
-          // Mistral OCR : API dédiée, traite une image à la fois → concaténer les résultats
+        if (step.model === 'mistral-ocr') {
+          // Mistral OCR : API dédiée, traite une image à la fois → concaténer
           const mistralKey = env.MISTRAL_API_KEY
           if (!mistralKey) throw new Error('MISTRAL_API_KEY manquante')
 
@@ -91,9 +138,19 @@ export async function POST (req: NextRequest) {
           promptSent = `[Mistral OCR — ${parsed.length} images envoyées individuellement, pas de prompt textuel]`
         } else {
           // Gemini : multimodal, toutes les images en une seule requête
-          const messages = buildMessagesWithImages(TRANSCRIPTION_DOC_PROMPT, parsed, modelId)
-          result = await callLLM(modelId, messages, env)
-          promptSent = TRANSCRIPTION_DOC_PROMPT
+          const prompt = step.numbered
+            ? TRANSCRIPTION_DOC_PROMPT + RECITATION_WORKAROUND_SUFFIX
+            : TRANSCRIPTION_DOC_PROMPT
+          const messages = buildMessagesWithImages(prompt, parsed, step.model)
+          result = await callLLM(step.model, messages, env, {
+            thinkingLevel: 'low',
+          })
+          promptSent = prompt
+
+          // Nettoyer les [Lx] si le prompt numéroté a été utilisé
+          if (step.numbered && result) {
+            result = cleanLineNumbers(result)
+          }
         }
 
         if (!result || result.trim().length < 20) {
@@ -101,13 +158,12 @@ export async function POST (req: NextRequest) {
         }
 
         const elapsedMs = performance.now() - t0
-        log(`✅ ${modelId} — Terminé (${result.length} chars)`)
+        log(`✅ ${step.label} — Terminé (${result.length} chars)`)
 
-        // Log du prompt envoyé + réponse complète
         logLLMCall({
           type: 'transcription-doc',
-          model: modelId,
-          provider: modelId === 'mistral-ocr' ? 'mistral' : 'google',
+          model: step.model,
+          provider: step.model === 'mistral-ocr' ? 'mistral' : 'google',
           prompt: { full: promptSent },
           messages: [{ role: 'user', content: `${promptSent}\n\n[${parsed.length} images jointes — non incluses dans le log]` }],
           options: {},
@@ -118,7 +174,8 @@ export async function POST (req: NextRequest) {
             timestamp: new Date().toISOString(),
             images_count: parsed.length,
             images_size_kb: Math.round(totalKb),
-            failed_models: failedModels.length > 0 ? failedModels : undefined,
+            failed_steps: failedSteps.length > 0 ? failedSteps : undefined,
+            numbered_workaround: step.numbered,
           },
         })
 
@@ -126,9 +183,20 @@ export async function POST (req: NextRequest) {
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err))
         const isRecitation = lastError.message.includes('RECITATION')
-        log(`⚠️ ${modelId} échoué${isRecitation ? ' (RECITATION)' : ''} : ${lastError.message}`)
-        failedModels.push(`${modelId}: ${lastError.message}`)
-        // Continuer vers le modèle suivant
+        log(`⚠️ ${step.label} échoué${isRecitation ? ' (RECITATION)' : ''} : ${lastError.message}`)
+        failedSteps.push(`${step.label}: ${lastError.message}`)
+
+        // Si l'erreur n'est PAS RECITATION → inutile de retenter le même modèle avec [Lx]
+        if (!isRecitation && !step.numbered && step.model !== 'mistral-ocr') {
+          const numberedLabel = PIPELINE.find(
+            (s) => s.model === step.model && s.numbered
+          )?.label
+          if (numberedLabel) {
+            log(`⏭️ Skip ${numberedLabel} (erreur non-RECITATION)`)
+            failedSteps.push(`${numberedLabel}: skipped (non-RECITATION error)`)
+            skipLabels.add(numberedLabel)
+          }
+        }
       }
     }
 

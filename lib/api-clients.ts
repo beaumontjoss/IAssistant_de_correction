@@ -374,7 +374,7 @@ export async function callGemini (
   model: string,
   parts: any[],
   apiKey: string,
-  options?: { jsonMode?: boolean }
+  options?: LLMOptions
 ) {
   const modelMap: Record<string, string> = {
     'gemini-3-flash': 'gemini-3-flash-preview',
@@ -387,6 +387,10 @@ export async function callGemini (
 
   if (options?.jsonMode) {
     generationConfig.responseMimeType = 'application/json'
+  }
+
+  if (options?.thinkingLevel) {
+    generationConfig.thinkingConfig = { thinkingLevel: options.thinkingLevel }
   }
 
   // Si les parts contiennent des messages OpenAI-style (role: system/user),
@@ -430,6 +434,16 @@ export async function callGemini (
     body.systemInstruction = { parts: [{ text: systemInstruction }] }
   }
 
+  // Debug logging
+  const partsInfo = actualParts.map((p: any, i: number) => {
+    if (p.text) return `parts[${i}]: text(${p.text.length}ch)`
+    if (p.inlineData) return `parts[${i}]: inlineData(${p.inlineData.mimeType}, ${Math.round((p.inlineData.data?.length || 0) / 1024)}KB)`
+    if (p.inline_data) return `parts[${i}]: ⚠️ inline_data(SNAKE_CASE!)`
+    return `parts[${i}]: ${JSON.stringify(Object.keys(p))}`
+  }).join(', ')
+  console.log(`[Gemini] 📤 model=${modelName}, ${actualParts.length} parts: ${partsInfo}`)
+  console.log(`[Gemini] 📤 generationConfig=${JSON.stringify(generationConfig)}`)
+
   const res = await fetchWithRetry(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
     {
@@ -452,7 +466,11 @@ export async function callGemini (
     throw new Error(`Gemini : réponse vide (raison : ${blockReason})`)
   }
 
-  return data.candidates[0].content.parts[0].text
+  // Extraire le texte de la réponse (ignorer les blocs thinking)
+  const responseParts = data.candidates[0].content.parts
+  const textPart = responseParts.find((p: any) => p.text && !p.thought) || responseParts[0]
+  console.log(`[Gemini] 📥 ${responseParts.length} parts, finishReason=${data.candidates[0].finishReason}`)
+  return textPart.text
 }
 
 // ─── DeepSeek ─────────────────────────────────────────────
@@ -707,12 +725,13 @@ export function buildMessagesWithImages (
   }
 
   if (provider === 'google') {
-    // Gemini uses a different format — handled separately
-    return images
-      .map((img) => ({
-        inline_data: { mime_type: img.mimeType, data: img.base64 },
-      }))
-      .concat([{ text: systemPrompt } as any])
+    // Gemini native parts format (camelCase, texte en premier)
+    return [
+      { text: systemPrompt },
+      ...images.map((img) => ({
+        inlineData: { mimeType: img.mimeType, data: img.base64 },
+      })),
+    ]
   }
 
   // OpenAI-compatible (OpenAI, xAI, Moonshot)
@@ -809,6 +828,8 @@ export interface LLMOptions {
   jsonMode?: boolean
   /** Schéma JSON pour Anthropic structured outputs (output_config.format) */
   anthropicSchema?: Record<string, any>
+  /** Niveau de réflexion pour Gemini 3 (minimal, low, medium, high). Non défini = défaut (high/dynamic). */
+  thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high'
 }
 
 export async function callLLM (

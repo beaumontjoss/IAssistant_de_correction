@@ -37,176 +37,181 @@ export async function POST (req: NextRequest) {
     console.log(`[BARÈME] ${elapsed}s — ${step}`)
   }
 
+  // ─── Parse body avant le stream ────────────────────────
+  let body: any
   try {
-    const body = await req.json()
-    const { modelId, matiere, classe, enonceImages, corrigeImages, enonceText: existingEnonceText, corrigeText: existingCorrigeText } = body
-
-    if (!modelId || !matiere || !classe || (!enonceImages?.length && !existingEnonceText)) {
-      return NextResponse.json(
-        { error: 'Paramètres manquants' },
-        { status: 400 }
-      )
-    }
-
-    log(`Début — modèle=${modelId}, ${enonceImages.length} img énoncé, ${corrigeImages?.length ?? 0} img corrigé`)
-
-    const env = {
-      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-      GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
-      DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
-      MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
-      MOONSHOT_API_KEY: process.env.MOONSHOT_API_KEY,
-      XAI_API_KEY: process.env.XAI_API_KEY,
-    }
-
-    // ─── Préparer les images ──────────────────────────────
-    const enonceImgParsed: ImageContent[] = []
-    for (const img of enonceImages) {
-      const match = img.match(/^data:([^;]+);base64,(.+)$/)
-      if (match) {
-        enonceImgParsed.push({ mimeType: match[1], base64: match[2] })
-      }
-    }
-
-    const corrigeImgParsed: ImageContent[] = []
-    if (corrigeImages?.length) {
-      for (const img of corrigeImages) {
-        const match = img.match(/^data:([^;]+);base64,(.+)$/)
-        if (match) {
-          corrigeImgParsed.push({ mimeType: match[1], base64: match[2] })
-        }
-      }
-    }
-
-    const allImages = [...enonceImgParsed, ...corrigeImgParsed]
-    const totalImgSize = allImages.reduce((sum, img) => sum + img.base64.length, 0)
-    log(`${allImages.length} images préparées (${(totalImgSize / 1024).toFixed(0)} KB base64)`)
-
-    const provider = getProviderFromModel(modelId)
-    const jsonMode = JSON_MODE_PROVIDERS.has(provider)
-    const useStructuredOutput = provider === 'anthropic' && modelId !== 'claude-opus-4-6'
-
-    // ─── Déterminer si on travaille en mode texte ou images ──
-    const hasEnonceText = !!existingEnonceText
-    const hasCorrigeText = !!existingCorrigeText
-    const useTextMode = hasEnonceText
-
-    if (useTextMode) {
-      log('Mode TEXTE — transcriptions disponibles, pas d\'envoi d\'images')
-    } else {
-      log('Mode IMAGES — pas de transcription, envoi des images en multimodal')
-    }
-
-    // ─── Construire le prompt barème ──────────────────────
-    const enonceContent = useTextMode ? existingEnonceText : '[Voir images de l\'énoncé ci-jointes]'
-    const corrigeContent = useTextMode && hasCorrigeText
-      ? existingCorrigeText
-      : (!useTextMode && corrigeImgParsed.length > 0)
-        ? '[Voir images du corrigé ci-jointes]'
-        : undefined
-
-    const prompt = getBaremePrompt(matiere, classe, enonceContent, corrigeContent ?? undefined)
-    log(`Prompt construit (${prompt.length} chars) — mode ${useTextMode ? 'texte' : 'images'}`)
-
-    // Options LLM communes
-    const llmOptions: Record<string, any> = { jsonMode }
-    if (useStructuredOutput) {
-      llmOptions.anthropicSchema = BAREME_JSON_SCHEMA
-      log('Structured outputs activés (Anthropic json_schema)')
-    }
-
-    // ─── Génération du barème ──────────────────────────────
-    const baremePromise = (async () => {
-      if (useTextMode) {
-        // Mode texte : prompt seul, pas d'images
-        const messages = buildTextMessages('', prompt)
-        return await callLLM(modelId, messages, env, llmOptions)
-      } else if (provider === 'google') {
-        const parts = buildMessagesWithImages(prompt, allImages, modelId)
-        return await callLLM(modelId, parts, env, llmOptions)
-      } else if (allImages.length > 0 && provider !== 'deepseek') {
-        const messages = buildMessagesWithImages(prompt, allImages, modelId)
-        return await callLLM(modelId, messages, env, llmOptions)
-      } else {
-        const messages = buildTextMessages('', prompt)
-        return await callLLM(modelId, messages, env, llmOptions)
-      }
-    })()
-
-    // ─── Transcriptions en parallèle (si pas déjà faites) ──
-    // Si on est en mode texte, pas besoin de re-transcrire
-    const enonceTextPromise = existingEnonceText
-      ? Promise.resolve(existingEnonceText as string)
-      : transcribeDocImages(enonceImgParsed, env, log, 'énoncé')
-
-    const corrigeTextPromise = existingCorrigeText
-      ? Promise.resolve(existingCorrigeText as string)
-      : corrigeImgParsed.length > 0
-        ? transcribeDocImages(corrigeImgParsed, env, log, 'corrigé')
-        : Promise.resolve(null)
-
-    // Attendre les résultats en parallèle
-    const [baremeResult, enonceText, corrigeText] = await Promise.all([
-      baremePromise,
-      enonceTextPromise,
-      corrigeTextPromise,
-    ])
-
-    log('Réponses reçues, parsing JSON du barème...')
-    const elapsedMs = performance.now() - t0
-
-    // Parsing robuste + normalisation
-    const parsed = robustJsonParse(baremeResult)
-    const bareme = normalizeBareme(parsed)
-
-    // Si aucune question n'a pu être extraite, créer un barème minimal éditable
-    if (bareme.questions.length === 0) {
-      log('⚠️ Aucune question extraite → barème par défaut')
-      bareme.total = 20
-      bareme.questions = [
-        {
-          id: '1',
-          titre: 'Item 1 — À compléter',
-          points: 20,
-          criteres: [{ question: '', description: 'Critère à définir par le professeur', points: 20 }],
-        },
-      ]
-    }
-
-    // Log asynchrone (non bloquant) — prompt complet + réponse brute
-    const logContent = useTextMode
-      ? prompt
-      : `${prompt}\n\n[${allImages.length} images jointes — non incluses dans le log]`
-    logLLMCall({
-      type: 'bareme',
-      model: modelId,
-      provider,
-      prompt: { full: prompt },
-      messages: [{ role: 'user', content: logContent }],
-      options: { jsonMode },
-      response_raw: baremeResult,
-      response_parsed: bareme,
-      meta: {
-        elapsed_ms: Math.round(elapsedMs),
-        timestamp: new Date().toISOString(),
-        mode: useTextMode ? 'text' : 'images',
-        images_count: useTextMode ? 0 : allImages.length,
-        images_size_kb: useTextMode ? 0 : Math.round(totalImgSize / 1024),
-      },
-    })
-
-    log(`✅ Terminé — ${bareme.questions.length} sections, ${bareme.total} pts`)
-    if (enonceText) log(`📝 Énoncé transcrit (${enonceText.length} chars)`)
-    if (corrigeText) log(`📝 Corrigé transcrit (${corrigeText.length} chars)`)
-
-    return NextResponse.json({ bareme, enonceText, corrigeText })
-  } catch (err: unknown) {
-    const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
-    console.error(`[BARÈME] ❌ ${elapsed}s — Erreur:`, err)
-    const message = err instanceof Error ? err.message : 'Erreur inconnue'
-    return NextResponse.json({ error: message }, { status: 500 })
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'Body JSON invalide' }, { status: 400 })
   }
+
+  const { modelId, matiere, classe, enonceImages, corrigeImages, enonceText: existingEnonceText, corrigeText: existingCorrigeText } = body
+
+  if (!modelId || !matiere || !classe || (!enonceImages?.length && !existingEnonceText)) {
+    return NextResponse.json({ error: 'Paramètres manquants' }, { status: 400 })
+  }
+
+  // ─── SSE Stream ────────────────────────────────────────
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    async start (controller) {
+      const send = (event: string, data: any) => {
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+      }
+
+      try {
+        send('step', { message: 'Préparation du prompt…' })
+        log(`Début — modèle=${modelId}`)
+
+        const env = {
+          OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+          GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
+          DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+          MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
+          MOONSHOT_API_KEY: process.env.MOONSHOT_API_KEY,
+          XAI_API_KEY: process.env.XAI_API_KEY,
+        }
+
+        // ─── Préparer les images ──────────────────────────
+        const enonceImgParsed: ImageContent[] = []
+        for (const img of (enonceImages || [])) {
+          const match = img.match(/^data:([^;]+);base64,(.+)$/)
+          if (match) enonceImgParsed.push({ mimeType: match[1], base64: match[2] })
+        }
+
+        const corrigeImgParsed: ImageContent[] = []
+        for (const img of (corrigeImages || [])) {
+          const match = img.match(/^data:([^;]+);base64,(.+)$/)
+          if (match) corrigeImgParsed.push({ mimeType: match[1], base64: match[2] })
+        }
+
+        const allImages = [...enonceImgParsed, ...corrigeImgParsed]
+        const totalImgSize = allImages.reduce((sum, img) => sum + img.base64.length, 0)
+
+        const provider = getProviderFromModel(modelId)
+        const jsonMode = JSON_MODE_PROVIDERS.has(provider)
+        const useStructuredOutput = provider === 'anthropic' && modelId !== 'claude-opus-4-6'
+
+        const hasEnonceText = !!existingEnonceText
+        const hasCorrigeText = !!existingCorrigeText
+        const useTextMode = hasEnonceText
+
+        // ─── Construire le prompt ──────────────────────────
+        const enonceContent = useTextMode ? existingEnonceText : '[Voir images de l\'énoncé ci-jointes]'
+        const corrigeContent = useTextMode && hasCorrigeText
+          ? existingCorrigeText
+          : (!useTextMode && corrigeImgParsed.length > 0)
+            ? '[Voir images du corrigé ci-jointes]'
+            : undefined
+
+        const prompt = getBaremePrompt(matiere, classe, enonceContent, corrigeContent ?? undefined)
+        log(`Prompt construit (${prompt.length} chars) — mode ${useTextMode ? 'texte' : 'images'}`)
+
+        const llmOptions: Record<string, any> = { jsonMode }
+        if (useStructuredOutput) {
+          llmOptions.anthropicSchema = BAREME_JSON_SCHEMA
+        }
+
+        // ─── Appel LLM ─────────────────────────────────────
+        send('step', { message: 'Génération du barème en cours…' })
+
+        const baremePromise = (async () => {
+          if (useTextMode) {
+            const messages = buildTextMessages('', prompt)
+            return await callLLM(modelId, messages, env, llmOptions)
+          } else if (provider === 'google') {
+            const parts = buildMessagesWithImages(prompt, allImages, modelId)
+            return await callLLM(modelId, parts, env, llmOptions)
+          } else if (allImages.length > 0 && provider !== 'deepseek') {
+            const messages = buildMessagesWithImages(prompt, allImages, modelId)
+            return await callLLM(modelId, messages, env, llmOptions)
+          } else {
+            const messages = buildTextMessages('', prompt)
+            return await callLLM(modelId, messages, env, llmOptions)
+          }
+        })()
+
+        // Transcriptions en parallèle (si pas déjà faites)
+        const enonceTextPromise = existingEnonceText
+          ? Promise.resolve(existingEnonceText as string)
+          : transcribeDocImages(enonceImgParsed, env, log, 'énoncé')
+
+        const corrigeTextPromise = existingCorrigeText
+          ? Promise.resolve(existingCorrigeText as string)
+          : corrigeImgParsed.length > 0
+            ? transcribeDocImages(corrigeImgParsed, env, log, 'corrigé')
+            : Promise.resolve(null)
+
+        const [baremeResult, enonceText, corrigeText] = await Promise.all([
+          baremePromise,
+          enonceTextPromise,
+          corrigeTextPromise,
+        ])
+
+        // ─── Parsing ──────────────────────────────────────
+        send('step', { message: 'Structuration du barème…' })
+        log('Réponses reçues, parsing JSON du barème...')
+        const elapsedMs = performance.now() - t0
+
+        const parsed = robustJsonParse(baremeResult)
+        const bareme = normalizeBareme(parsed)
+
+        if (bareme.questions.length === 0) {
+          log('⚠️ Aucune question extraite → barème par défaut')
+          bareme.total = 20
+          bareme.questions = [{
+            id: '1',
+            titre: 'Item 1 — À compléter',
+            points: 20,
+            criteres: [{ question: '', description: 'Critère à définir par le professeur', points: 20 }],
+          }]
+        }
+
+        // Log asynchrone
+        const logContent = useTextMode
+          ? prompt
+          : `${prompt}\n\n[${allImages.length} images jointes — non incluses dans le log]`
+        logLLMCall({
+          type: 'bareme',
+          model: modelId,
+          provider,
+          prompt: { full: prompt },
+          messages: [{ role: 'user', content: logContent }],
+          options: { jsonMode },
+          response_raw: baremeResult,
+          response_parsed: bareme,
+          meta: {
+            elapsed_ms: Math.round(elapsedMs),
+            timestamp: new Date().toISOString(),
+            mode: useTextMode ? 'text' : 'images',
+            images_count: useTextMode ? 0 : allImages.length,
+            images_size_kb: useTextMode ? 0 : Math.round(totalImgSize / 1024),
+          },
+        })
+
+        log(`✅ Terminé — ${bareme.questions.length} sections, ${bareme.total} pts`)
+
+        // ─── Envoi du résultat ─────────────────────────────
+        send('result', { bareme, enonceText, corrigeText })
+      } catch (err) {
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(1)
+        console.error(`[BARÈME] ❌ ${elapsed}s — Erreur:`, err)
+        const message = err instanceof Error ? err.message : 'Erreur inconnue'
+        send('error', { error: message })
+      } finally {
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  })
 }
 
 /**

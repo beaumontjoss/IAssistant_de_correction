@@ -59,6 +59,8 @@ export default function ControlePage () {
   const [correctingIds, setCorrectingIds] = useState<Set<string>>(new Set())
   const [deletingCopyId, setDeletingCopyId] = useState<string | null>(null)
   const [reuploadCopyId, setReuploadCopyId] = useState<string | null>(null)
+  const [editingNameId, setEditingNameId] = useState<string | null>(null)
+  const [editingNameValue, setEditingNameValue] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('nom')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
@@ -109,7 +111,6 @@ export default function ControlePage () {
     setCopies((prev) => [...prev, newCopy])
     setNewStudentName('')
     setExpandedCopy(newCopy.id)
-    toast.success('Copie ajoutée', { description: `La copie de ${newCopy.nom_eleve} est prête.` })
   }, [newStudentName, controleId, copies.length])
 
   const updateCopy = useCallback(async (copyId: string, updates: Partial<CopieEleve>) => {
@@ -464,7 +465,39 @@ export default function ControlePage () {
                               {index + 1}
                             </div>
                             <div className="text-left">
-                              <p className="font-medium text-texte-primaire">{copy.nom_eleve}</p>
+                              {editingNameId === copy.id ? (
+                                <input
+                                  autoFocus
+                                  value={editingNameValue}
+                                  onChange={(e) => setEditingNameValue(e.target.value)}
+                                  onBlur={() => {
+                                    const trimmed = editingNameValue.trim()
+                                    if (trimmed && trimmed !== copy.nom_eleve) {
+                                      updateCopy(copy.id, { nom_eleve: trimmed })
+                                    }
+                                    setEditingNameId(null)
+                                  }}
+                                  onKeyDown={(e) => {
+                                    e.stopPropagation()
+                                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                                    if (e.key === 'Escape') setEditingNameId(null)
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="font-medium text-texte-primaire bg-transparent border-b-2 border-bleu-france outline-none px-0 py-0 w-48"
+                                />
+                              ) : (
+                                <p
+                                  className="font-medium text-texte-primaire hover:text-bleu-france cursor-text transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setEditingNameId(copy.id)
+                                    setEditingNameValue(copy.nom_eleve)
+                                  }}
+                                  title="Cliquer pour modifier le nom"
+                                >
+                                  {copy.nom_eleve}
+                                </p>
+                              )}
                               <div className="flex items-center gap-2 mt-0.5">
                                 {copy.images.length > 0 && (
                                   <span className="text-xs text-texte-secondaire">
@@ -731,8 +764,8 @@ export default function ControlePage () {
                                     isLoading={correctingIds.has(copy.id)}
                                     className="gap-2 w-full"
                                   >
-                                    <Sparkles className="h-4 w-4" />
-                                    Corriger cette copie
+                                    {!correctingIds.has(copy.id) && <Sparkles className="h-4 w-4" />}
+                                    {correctingIds.has(copy.id) ? 'Correction en cours...' : 'Corriger cette copie'}
                                   </Button>
                                 )}
                               </div>
@@ -768,16 +801,20 @@ export default function ControlePage () {
                     </div>
                     <div>
                       <p className="font-bold text-texte-primaire">
-                        {uncorrectedCount} copie{uncorrectedCount > 1 ? 's' : ''} en attente
+                        {correctingIds.size > 0
+                          ? 'Correction en cours...'
+                          : `${uncorrectedCount} copie${uncorrectedCount > 1 ? 's' : ''} en attente`}
                       </p>
                       <p className="text-sm text-texte-secondaire">
-                        Lancez la correction IA pour toutes les copies validées
+                        {correctingIds.size > 0
+                          ? 'Veuillez patienter'
+                          : 'Lancez la correction IA pour toutes les copies validées'}
                       </p>
                     </div>
                   </div>
                   <Button onClick={correctAll} isLoading={correctingIds.size > 0} className="gap-2">
-                    <Sparkles className="h-4 w-4" />
-                    Tout corriger
+                    {correctingIds.size === 0 && <Sparkles className="h-4 w-4" />}
+                    {correctingIds.size > 0 ? 'Correction en cours...' : 'Tout corriger'}
                   </Button>
                 </CardContent>
               </Card>
